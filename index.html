@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PocketRoom</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Nickname setup -->
+  <div id="view-nickname" class="view">
+    <h2>ニックネームを設定</h2>
+    <p>LAN内だけの小さな部屋チャット</p>
+    <input type="text" id="input-nickname" placeholder="あなたの名前" maxlength="16">
+    <button id="btn-set-nickname" class="btn-primary">はじめる</button>
+  </div>
+
+  <!-- Room list -->
+  <div id="view-rooms" class="view hidden">
+    <div class="rooms-header">
+      <span id="user-name-display"></span>
+      <button id="btn-create-room" class="btn-icon" title="部屋を作成">+</button>
+    </div>
+    <div id="room-list"></div>
+    <div id="no-rooms">部屋がありません</div>
+  </div>
+
+  <!-- Chat -->
+  <div id="view-chat" class="view hidden">
+    <div class="chat-header">
+      <button id="btn-back">←</button>
+      <span id="chat-room-name"></span>
+      <span id="chat-member-count"></span>
+    </div>
+    <div id="messages"></div>
+    <div class="chat-input-area">
+      <input type="text" id="input-message" placeholder="メッセージ..." maxlength="200">
+      <button id="btn-send">→</button>
+    </div>
+  </div>
+
+  <!-- Modal: create room -->
+  <div id="modal-create-room" class="modal hidden">
+    <div class="modal-content">
+      <h3>部屋を作成</h3>
+      <input type="text" id="input-room-name" placeholder="部屋名（必須）" maxlength="20">
+      <input type="password" id="input-room-password" placeholder="パスワード（任意）" maxlength="32">
+      <div class="modal-buttons">
+        <button id="btn-cancel-create" class="btn-secondary">キャンセル</button>
+        <button id="btn-confirm-create" class="btn-primary">作成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: enter password -->
+  <div id="modal-password" class="modal hidden">
+    <div class="modal-content">
+      <h3 id="modal-password-title">パスワードを入力</h3>
+      <input type="password" id="input-join-password" placeholder="パスワード" maxlength="32">
+      <div class="modal-buttons">
+        <button id="btn-cancel-join" class="btn-secondary">キャンセル</button>
+        <button id="btn-confirm-join" class="btn-primary">入室</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script src="renderer.js"></script>
+</body>
+</html>
