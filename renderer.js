@@ -1,6 +1,7 @@
 const PORT = window.api.port
 let ws
 let nickname = localStorage.getItem('nickname') || ''
+let serverHost = localStorage.getItem('serverHost') || ''
 let currentRoomId = null
 let pendingJoinRoomId = null
 let pendingJoinRoomName = null
@@ -11,7 +12,7 @@ let pendingCreatePassword = ''
 
 // ---- WebSocket ----
 function connect() {
-  ws = new WebSocket(`ws://localhost:${PORT}`)
+  ws = new WebSocket(`ws://${serverHost || 'localhost'}:${PORT}`)
 
   ws.onopen = () => {
     console.log('[WS] connected')
@@ -71,7 +72,7 @@ function handleMessage(msg) {
 }
 
 // ---- Views ----
-const VIEW_SIZES = { nickname: [240, 132], rooms: [240, 192], chat: [240, 110] }
+const VIEW_SIZES = { nickname: [240, 168], rooms: [240, 192], chat: [240, 110] }
 
 function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'))
@@ -87,6 +88,7 @@ function initApp() {
   if (nickname) {
     document.getElementById('user-name-display').textContent = nickname
     showView('rooms')
+    showHost()
     connect()
   } else {
     showView('nickname')
@@ -98,12 +100,22 @@ function setNickname() {
   if (!val) { document.getElementById('input-nickname').focus(); return }
   nickname = val
   localStorage.setItem('nickname', nickname)
+  serverHost = $('input-host').value.trim()
+  localStorage.setItem('serverHost', serverHost)
   document.getElementById('user-name-display').textContent = nickname
   showView('rooms')
+  showHost()
   connect()
 }
 
+// ホスト側は自分のLAN IPを表示し、参加側には接続先を表示する
+async function showHost() {
+  const ip = serverHost ? serverHost : await window.api.lanIp()
+  $('host-display').textContent = ip || ''
+}
+
 $('btn-set-nickname').addEventListener('click', setNickname)
+$('input-host').addEventListener('keydown', e => { if (e.key === 'Enter') setNickname() })
 $('input-nickname').addEventListener('keydown', e => { if (e.key === 'Enter') setNickname() })
 
 // ---- Room list ----

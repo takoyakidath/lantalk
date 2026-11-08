@@ -66,15 +66,15 @@ function startServer(port) {
         }
 
         case 'room:create': {
-          const name = (msg.name || '').trim()
+          const name = String(msg.name || '').trim().slice(0, 20)
           if (!name) {
             ws.send(JSON.stringify({ type: 'room:error', message: '部屋名を入力してください' }))
             break
           }
           const id = crypto.randomUUID()
           let passwordHash = null
-          if (msg.password && msg.password.trim()) {
-            passwordHash = await bcrypt.hash(msg.password, SALT_ROUNDS)
+          if (typeof msg.password === 'string' && msg.password.trim()) {
+            passwordHash = await bcrypt.hash(msg.password.slice(0, 32), SALT_ROUNDS)
           }
           rooms.set(id, { id, name, passwordHash, createdAt: Date.now() })
           messages.set(id, [])
@@ -91,15 +91,15 @@ function startServer(port) {
             break
           }
           if (room.passwordHash) {
-            const valid = msg.password
-              ? await bcrypt.compare(msg.password, room.passwordHash)
+            const valid = typeof msg.password === 'string' && msg.password
+              ? await bcrypt.compare(msg.password.slice(0, 32), room.passwordHash)
               : false
             if (!valid) {
               ws.send(JSON.stringify({ type: 'room:error', message: 'パスワードが違います' }))
               break
             }
           }
-          if (msg.nickname) ws.nickname = msg.nickname
+          if (typeof msg.nickname === 'string' && msg.nickname.trim()) ws.nickname = msg.nickname.trim().slice(0, 16)
           const members = roomMembers.get(room.id)
           members.add(ws)
           ws.joinedRooms.add(room.id)
@@ -124,8 +124,8 @@ function startServer(port) {
         }
 
         case 'chat:send': {
-          const { roomId, text, nickname } = msg
-          if (!text || !text.trim()) break
+          const { roomId, text } = msg
+          if (typeof text !== 'string' || !text.trim()) break
           const members = roomMembers.get(roomId)
           if (!members || !members.has(ws)) {
             ws.send(JSON.stringify({ type: 'room:error', message: '部屋に参加していません' }))
@@ -134,8 +134,8 @@ function startServer(port) {
           const message = {
             id: crypto.randomUUID(),
             roomId,
-            user: nickname || ws.nickname,
-            text: text.trim(),
+            user: ws.nickname,
+            text: text.trim().slice(0, 200),
             createdAt: Date.now()
           }
           const log = messages.get(roomId)

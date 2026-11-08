@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PocketRoom</title>
+  <title>LanTalk</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,6 +14,7 @@
     <h2>ニックネームを設定</h2>
     <p>LAN内だけの小さな部屋チャット</p>
     <input type="text" id="input-nickname" placeholder="あなたの名前" maxlength="16">
+    <input type="text" id="input-host" placeholder="サーバーIP（空欄=この端末）" maxlength="64">
     <button id="btn-set-nickname" class="btn-primary">はじめる</button>
   </div>
 
@@ -21,6 +22,7 @@
   <div id="view-rooms" class="view hidden">
     <div class="rooms-header">
       <span id="user-name-display"></span>
+      <span id="host-display" title="他の端末はこのIPを指定して参加"></span>
       <button id="btn-create-room" class="btn-icon" title="部屋を作成">+</button>
     </div>
     <div id="room-list"></div>

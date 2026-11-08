@@ -82,8 +82,15 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 170px;
+  max-width: 90px;
   -webkit-app-region: no-drag;
+}
+
+#host-display {
+  font-size: 9px;
+  color: #999;
+  margin-left: auto;
+  margin-right: 6px;
 }
 
 #room-list {

@@ -72,7 +72,6 @@
   },
   "homepage": "https://github.com/takoyakidath/lantalk#readme",
   "dependencies": {
-    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "electron": "^41.2.0",
     "uuid": "^13.0.0",

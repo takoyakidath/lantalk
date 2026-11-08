@@ -1,5 +1,6 @@
 const { app, BrowserWindow, globalShortcut, screen, ipcMain, Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
+const os = require('os')
 const { startServer } = require('./server')
 
 const PORT = 7823
@@ -24,7 +25,7 @@ function createTray() {
   }
   const icon = nativeImage.createFromBuffer(canvas, { width: size, height: size })
   tray = new Tray(icon)
-  tray.setToolTip('PocketRoom')
+  tray.setToolTip('LanTalk')
   const menu = Menu.buildFromTemplate([
     { label: '表示/非表示', click: toggleWindow },
     { type: 'separator' },
@@ -83,6 +84,15 @@ app.whenReady().then(() => {
   createTray()
 
   globalShortcut.register('CommandOrControl+Shift+C', toggleWindow)
+})
+
+ipcMain.handle('net:lan-ip', () => {
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const a of addrs || []) {
+      if (a.family === 'IPv4' && !a.internal) return a.address
+    }
+  }
+  return null
 })
 
 ipcMain.on('window:hide', () => mainWindow.hide())
