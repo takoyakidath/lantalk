@@ -130,16 +130,19 @@ function renderRoomList() {
   }
 
   noRooms.classList.add('hidden')
-  list.innerHTML = allRooms.map(room => {
-    const unread = unreadCounts[room.id] || 0
+  // サーバーは任意のホストを指定できるため、受信値は型を確認してから描画する
+  const UUID = /^[0-9a-f-]{36}$/i
+  list.innerHTML = allRooms.filter(room => UUID.test(String(room.id))).map(room => {
+    const unread = Number(unreadCounts[room.id]) || 0
+    const count = Number(room.memberCount) || 0
     const lockHtml = room.hasPassword ? '<span class="lock-icon">🔒</span>' : ''
     const badgeHtml = unread > 0 ? `<span class="unread-badge">${unread}</span>` : ''
-    return `<div class="room-item" data-id="${room.id}" data-has-pw="${room.hasPassword}" data-name="${esc(room.name)}">
+    return `<div class="room-item" data-id="${esc(room.id)}" data-has-pw="${room.hasPassword === true}" data-name="${esc(room.name)}">
       <div class="room-item-left">
         <span class="room-name">${esc(room.name)}</span>${lockHtml}
       </div>
       <div class="room-item-right">
-        <span class="member-count">${room.memberCount}人</span>${badgeHtml}
+        <span class="member-count">${count}人</span>${badgeHtml}
       </div>
     </div>`
   }).join('')
@@ -219,7 +222,7 @@ function closePasswordModal() {
 // ---- Chat ----
 function renderChat(room, msgs, memberCount) {
   $('chat-room-name').textContent = room.name
-  $('chat-member-count').textContent = `${memberCount}人`
+  $('chat-member-count').textContent = `${Number(memberCount) || 0}人`
   const container = $('messages')
   container.innerHTML = ''
   msgs.forEach(m => appendMessage(m, false))
