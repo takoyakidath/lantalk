@@ -1,63 +1,73 @@
 const PORT = window.api.port
+const UUID = /^[0-9a-f-]{36}$/i
+
 let ws
+let connectGen = 0
 let nickname = localStorage.getItem('nickname') || ''
 let serverHost = localStorage.getItem('serverHost') || ''
 let currentRoomId = null
 let pendingJoinRoomId = null
-let pendingJoinRoomName = null
+let pendingCreatePassword = ''
 let allRooms = []
 let unreadCounts = {}
-let recentRooms = JSON.parse(localStorage.getItem('recentRooms') || '[]')
-let pendingCreatePassword = ''
+let lastMsgUser = null
+let toastTimer = null
 
 // ---- WebSocket ----
 function connect() {
+  const gen = ++connectGen
+  if (ws) ws.close()
   ws = new WebSocket(`ws://${serverHost || 'localhost'}:${PORT}`)
+  const sock = ws
 
-  ws.onopen = () => {
-    console.log('[WS] connected')
-  }
+  sock.onopen = () => setOnline(true)
 
-  ws.onmessage = (e) => {
+  sock.onmessage = (e) => {
     try { handleMessage(JSON.parse(e.data)) } catch (err) { console.error(err) }
   }
 
-  ws.onclose = () => {
-    console.log('[WS] disconnected, retrying...')
-    setTimeout(connect, 2000)
+  sock.onclose = () => {
+    if (gen !== connectGen) return // 設定変更で張り直し済み
+    setOnline(false)
+    setTimeout(() => { if (gen === connectGen) connect() }, 2000)
   }
 
-  ws.onerror = () => ws.close()
+  sock.onerror = () => sock.close()
 }
 
 function send(data) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data))
 }
 
+function setOnline(online) {
+  $('conn-banner').classList.toggle('hidden', online)
+  $('conn-banner-chat').classList.toggle('hidden', online)
+  if (!online) allRooms = []
+  if (!online) renderRoomList()
+}
+
 function handleMessage(msg) {
   switch (msg.type) {
     case 'room:list':
-      allRooms = msg.rooms
+      allRooms = Array.isArray(msg.rooms) ? msg.rooms : []
       renderRoomList()
       break
 
     case 'room:created':
-      // Auto-join after creating — pass the password so owner isn't rejected
+      // 作成者はパスワード付きでもそのまま入室する
       send({ type: 'room:join', roomId: msg.room.id, nickname, password: pendingCreatePassword })
       pendingCreatePassword = ''
-      saveRecentRoom(msg.room.id)
       break
 
     case 'room:joined':
       currentRoomId = msg.room.id
-      saveRecentRoom(msg.room.id)
       unreadCounts[msg.room.id] = 0
       renderChat(msg.room, msg.messages, msg.memberCount)
       showView('chat')
       break
 
     case 'room:error':
-      showError(msg.message)
+      showToast(msg.message)
       break
 
     case 'chat:message':
@@ -72,97 +82,112 @@ function handleMessage(msg) {
 }
 
 // ---- Views ----
-const VIEW_SIZES = { nickname: [240, 168], rooms: [240, 192], chat: [240, 110] }
+const VIEW_SIZES = { setup: [320, 380], rooms: [320, 440], chat: [320, 500] }
 
 function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'))
-  document.getElementById(`view-${name}`).classList.remove('hidden')
-  const [w, h] = VIEW_SIZES[name] || [240, 200]
+  $(`view-${name}`).classList.remove('hidden')
+  const [w, h] = VIEW_SIZES[name]
   window.api.resize(w, h)
-  if (name === 'chat') setTimeout(() => document.getElementById('input-message').focus(), 50)
-  if (name === 'nickname') setTimeout(() => document.getElementById('input-nickname').focus(), 50)
+  if (name === 'chat') setTimeout(() => $('input-message').focus(), 50)
+  if (name === 'setup') setTimeout(() => $('input-nickname').focus(), 50)
 }
 
-// ---- Nickname ----
+document.querySelectorAll('.btn-hide').forEach(b => b.addEventListener('click', () => window.api.hide()))
+
+// ---- Setup (初回 / 設定変更) ----
 function initApp() {
   if (nickname) {
-    document.getElementById('user-name-display').textContent = nickname
-    showView('rooms')
-    showHost()
+    enterRooms()
     connect()
   } else {
-    showView('nickname')
+    showView('setup')
   }
 }
 
-function setNickname() {
-  const val = document.getElementById('input-nickname').value.trim()
-  if (!val) { document.getElementById('input-nickname').focus(); return }
-  nickname = val
-  localStorage.setItem('nickname', nickname)
-  serverHost = $('input-host').value.trim()
-  localStorage.setItem('serverHost', serverHost)
-  document.getElementById('user-name-display').textContent = nickname
-  showView('rooms')
+function enterRooms() {
+  $('user-name-display').textContent = nickname
+  paintAvatar($('profile-avatar'), nickname)
   showHost()
-  connect()
+  renderRoomList()
+  showView('rooms')
 }
 
-// ホスト側は自分のLAN IPを表示し、参加側には接続先を表示する
 async function showHost() {
-  const ip = serverHost ? serverHost : await window.api.lanIp()
+  const ip = serverHost || await window.api.lanIp()
   $('host-display').textContent = ip || ''
 }
 
-$('btn-set-nickname').addEventListener('click', setNickname)
-$('input-host').addEventListener('keydown', e => { if (e.key === 'Enter') setNickname() })
-$('input-nickname').addEventListener('keydown', e => { if (e.key === 'Enter') setNickname() })
+$('btn-profile').addEventListener('click', () => {
+  $('input-nickname').value = nickname
+  $('input-host').value = serverHost
+  $('btn-cancel-setup').classList.remove('hidden')
+  showView('setup')
+})
+
+$('btn-cancel-setup').addEventListener('click', enterRooms)
+
+$('setup-form').addEventListener('submit', (e) => {
+  e.preventDefault()
+  const name = $('input-nickname').value.trim()
+  if (!name) { $('input-nickname').focus(); return }
+  const host = $('input-host').value.trim()
+  const changed = name !== nickname || host !== serverHost
+  nickname = name
+  serverHost = host
+  localStorage.setItem('nickname', nickname)
+  localStorage.setItem('serverHost', serverHost)
+  currentRoomId = null
+  $('btn-cancel-setup').classList.add('hidden')
+  enterRooms()
+  if (changed || !ws) connect()
+})
 
 // ---- Room list ----
 function renderRoomList() {
   const list = $('room-list')
-  const noRooms = $('no-rooms')
+  // 接続先を自由に指定できるので、受信した値は型を確認してから描画する
+  const rooms = allRooms.filter(r => r && UUID.test(String(r.id)))
+  list.replaceChildren()
+  $('no-rooms').classList.toggle('hidden', rooms.length > 0)
+  list.classList.toggle('hidden', rooms.length === 0)
 
-  if (allRooms.length === 0) {
-    list.innerHTML = ''
-    noRooms.classList.remove('hidden')
-    return
-  }
-
-  noRooms.classList.add('hidden')
-  // サーバーは任意のホストを指定できるため、受信値は型を確認してから描画する
-  const UUID = /^[0-9a-f-]{36}$/i
-  list.innerHTML = allRooms.filter(room => UUID.test(String(room.id))).map(room => {
-    const unread = Number(unreadCounts[room.id]) || 0
+  rooms.forEach(room => {
+    const name = String(room.name || '')
     const count = Number(room.memberCount) || 0
-    const lockHtml = room.hasPassword ? '<span class="lock-icon">🔒</span>' : ''
-    const badgeHtml = unread > 0 ? `<span class="unread-badge">${unread}</span>` : ''
-    return `<div class="room-item" data-id="${esc(room.id)}" data-has-pw="${room.hasPassword === true}" data-name="${esc(room.name)}">
-      <div class="room-item-left">
-        <span class="room-name">${esc(room.name)}</span>${lockHtml}
-      </div>
-      <div class="room-item-right">
-        <span class="member-count">${count}人</span>${badgeHtml}
-      </div>
-    </div>`
-  }).join('')
+    const unread = Number(unreadCounts[room.id]) || 0
+    const locked = room.hasPassword === true
 
-  list.querySelectorAll('.room-item').forEach(el => {
-    el.addEventListener('click', () => {
-      const roomId = el.dataset.id
-      const hasPw = el.dataset.hasPw === 'true'
-      const roomName = el.dataset.name
-      if (hasPw) {
-        pendingJoinRoomId = roomId
-        pendingJoinRoomName = roomName
-        $('modal-password-title').textContent = `「${roomName}」のパスワード`
-        openModal('modal-password')
-        setTimeout(() => $('input-join-password').focus(), 50)
-      } else {
-        doJoin(roomId, '')
-      }
-    })
+    const li = el('li', 'room-item')
+    li.tabIndex = 0
+    li.append(avatarEl(name, true))
+
+    const main = el('div', 'room-main')
+    main.append(el('span', 'room-name', name))
+    const meta = el('span', 'room-meta')
+    meta.append(el('span', count > 0 ? 'dot live' : 'dot'))
+    meta.append(document.createTextNode(`${count}人${locked ? ' ・ パスワードあり' : ''}`))
+    main.append(meta)
+    li.append(main)
+
+    if (unread > 0) li.append(el('span', 'unread-badge', String(unread)))
+
+    const open = () => joinOrAsk(room.id, name, locked)
+    li.addEventListener('click', open)
+    li.addEventListener('keydown', e => { if (e.key === 'Enter') open() })
+    list.append(li)
   })
+}
+
+function joinOrAsk(roomId, roomName, locked) {
+  if (locked) {
+    pendingJoinRoomId = roomId
+    $('modal-password-title').textContent = `「${roomName}」のパスワード`
+    openModal('modal-password')
+    setTimeout(() => $('input-join-password').focus(), 50)
+  } else {
+    doJoin(roomId, '')
+  }
 }
 
 function doJoin(roomId, password) {
@@ -175,24 +200,22 @@ function doJoin(roomId, password) {
 }
 
 // ---- Create room ----
-$('btn-create-room').addEventListener('click', () => {
+function openCreate() {
   openModal('modal-create-room')
   setTimeout(() => $('input-room-name').focus(), 50)
-})
-
-$('btn-cancel-create').addEventListener('click', closeCreateModal)
-$('btn-confirm-create').addEventListener('click', createRoom)
-$('input-room-password').addEventListener('keydown', e => { if (e.key === 'Enter') createRoom() })
-$('input-room-name').addEventListener('keydown', e => { if (e.key === 'Enter') $('input-room-password').focus() })
-
-function createRoom() {
-  const name = $('input-room-name').value.trim()
-  const password = $('input-room-password').value
-  if (!name) { $('input-room-name').focus(); return }
-  pendingCreatePassword = password
-  send({ type: 'room:create', name, password })
-  closeCreateModal()
 }
+$('btn-create-room').addEventListener('click', openCreate)
+$('btn-empty-create').addEventListener('click', openCreate)
+$('btn-cancel-create').addEventListener('click', closeCreateModal)
+
+$('create-form').addEventListener('submit', (e) => {
+  e.preventDefault()
+  const name = $('input-room-name').value.trim()
+  if (!name) { $('input-room-name').focus(); return }
+  pendingCreatePassword = $('input-room-password').value
+  send({ type: 'room:create', name, password: pendingCreatePassword })
+  closeCreateModal()
+})
 
 function closeCreateModal() {
   closeModal('modal-create-room')
@@ -202,46 +225,56 @@ function closeCreateModal() {
 
 // ---- Password modal ----
 $('btn-cancel-join').addEventListener('click', closePasswordModal)
-$('btn-confirm-join').addEventListener('click', confirmJoin)
-$('input-join-password').addEventListener('keydown', e => { if (e.key === 'Enter') confirmJoin() })
 
-function confirmJoin() {
+$('join-form').addEventListener('submit', (e) => {
+  e.preventDefault()
   const password = $('input-join-password').value
   const roomId = pendingJoinRoomId
   closePasswordModal()
   if (roomId) doJoin(roomId, password)
-}
+})
 
 function closePasswordModal() {
   closeModal('modal-password')
   $('input-join-password').value = ''
   pendingJoinRoomId = null
-  pendingJoinRoomName = null
 }
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return
+  if (!$('modal-create-room').classList.contains('hidden')) closeCreateModal()
+  else if (!$('modal-password').classList.contains('hidden')) closePasswordModal()
+})
 
 // ---- Chat ----
 function renderChat(room, msgs, memberCount) {
   $('chat-room-name').textContent = room.name
-  $('chat-member-count').textContent = `${Number(memberCount) || 0}人`
+  $('chat-member-count').textContent = `${Number(memberCount) || 0}人が参加中`
   const container = $('messages')
-  container.innerHTML = ''
+  container.replaceChildren()
+  lastMsgUser = null
   msgs.forEach(m => appendMessage(m, false))
   container.scrollTop = container.scrollHeight
 }
 
 function appendMessage(msg, scroll = true) {
   const container = $('messages')
-  const isOwn = msg.user === nickname
-  const div = document.createElement('div')
-  div.className = `message ${isOwn ? 'own' : 'other'}`
+  const user = String(msg.user || '')
+  const isOwn = user === nickname
+  const cont = lastMsgUser === user // 同じ人の連続投稿は名前とアイコンを省く
+  lastMsgUser = user
+
+  const row = el('div', `message ${isOwn ? 'own' : 'other'}${cont ? ' cont' : ''}`)
+  if (!isOwn) row.append(avatarEl(user))
+
+  const body = el('div', 'msg-body')
+  if (!isOwn && !cont) body.append(el('span', 'msg-user', user))
+  body.append(el('div', 'msg-text', String(msg.text || '')))
   const time = new Date(msg.createdAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
-  div.innerHTML = `
-    ${!isOwn ? `<span class="msg-user">${esc(msg.user)}</span>` : ''}
-    <div class="msg-bubble">
-      <span class="msg-text">${esc(msg.text)}</span>
-      <span class="msg-time">${time}</span>
-    </div>`
-  container.appendChild(div)
+  body.append(el('span', 'msg-time', time))
+  row.append(body)
+
+  container.append(row)
   if (scroll) container.scrollTop = container.scrollHeight
 }
 
@@ -253,48 +286,48 @@ $('btn-back').addEventListener('click', () => {
   showView('rooms')
 })
 
-$('btn-send').addEventListener('click', sendMessage)
-$('input-message').addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage() })
-
-function sendMessage() {
+$('chat-form').addEventListener('submit', (e) => {
+  e.preventDefault()
   const input = $('input-message')
   const text = input.value.trim()
   if (!text || !currentRoomId) return
-  send({ type: 'chat:send', roomId: currentRoomId, text, nickname })
+  send({ type: 'chat:send', roomId: currentRoomId, text })
   input.value = ''
-}
-
-// ---- Recent rooms ----
-function saveRecentRoom(roomId) {
-  recentRooms = [roomId, ...recentRooms.filter(id => id !== roomId)].slice(0, 5)
-  localStorage.setItem('recentRooms', JSON.stringify(recentRooms))
-}
-
-// ---- Window controls ----
-// Titlebar removed — hide via tray or Cmd+Shift+C
+})
 
 // ---- Utilities ----
 function $(id) { return document.getElementById(id) }
 
-function esc(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+function el(tag, className, text) {
+  const node = document.createElement(tag)
+  if (className) node.className = className
+  if (text !== undefined) node.textContent = text
+  return node
+}
+
+// ニックネームから色を決めて、同じ人は常に同じ色で表示する
+function paintAvatar(node, name) {
+  let h = 0
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 360
+  node.style.setProperty('--hue', String(h))
+  node.textContent = [...name][0] || '?'
+}
+
+function avatarEl(name, square = false) {
+  const a = el('span', square ? 'avatar sq' : 'avatar')
+  paintAvatar(a, name)
+  return a
 }
 
 function openModal(id) { $(id).classList.remove('hidden') }
 function closeModal(id) { $(id).classList.add('hidden') }
 
-function showError(msg) {
-  const existing = document.querySelector('.error-toast')
-  if (existing) existing.remove()
-  const el = document.createElement('div')
-  el.className = 'error-toast'
-  el.textContent = msg
-  document.getElementById('app').appendChild(el)
-  setTimeout(() => el.remove(), 3000)
+function showToast(msg) {
+  const t = $('toast')
+  t.textContent = msg
+  t.classList.remove('hidden')
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => t.classList.add('hidden'), 3000)
 }
 
 // ---- Start ----

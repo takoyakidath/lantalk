@@ -46,7 +46,7 @@ function toggleWindow() {
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay()
-  const W = 240, H = 192
+  const W = 320, H = 380
 
   mainWindow = new BrowserWindow({
     width: W,

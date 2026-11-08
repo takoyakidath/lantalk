@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ws:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws:">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LanTalk</title>
   <link rel="stylesheet" href="style.css">
@@ -10,65 +10,105 @@
 <body>
 <div id="app">
 
-  <!-- Nickname setup -->
-  <div id="view-nickname" class="view">
-    <h2>ニックネームを設定</h2>
-    <p>LAN内だけの小さな部屋チャット</p>
-    <input type="text" id="input-nickname" placeholder="あなたの名前" maxlength="16">
-    <input type="text" id="input-host" placeholder="サーバーIP（空欄=この端末）" maxlength="64">
-    <button id="btn-set-nickname" class="btn-primary">はじめる</button>
-  </div>
-
-  <!-- Room list -->
-  <div id="view-rooms" class="view hidden">
-    <div class="rooms-header">
-      <span id="user-name-display"></span>
-      <span id="host-display" title="他の端末はこのIPを指定して参加"></span>
-      <button id="btn-create-room" class="btn-icon" title="部屋を作成">+</button>
-    </div>
-    <div id="room-list"></div>
-    <div id="no-rooms">部屋がありません</div>
-  </div>
-
-  <!-- Chat -->
-  <div id="view-chat" class="view hidden">
-    <div class="chat-header">
-      <button id="btn-back">←</button>
-      <span id="chat-room-name"></span>
-      <span id="chat-member-count"></span>
-    </div>
-    <div id="messages"></div>
-    <div class="chat-input-area">
-      <input type="text" id="input-message" placeholder="メッセージ..." maxlength="200">
-      <button id="btn-send">→</button>
-    </div>
-  </div>
-
-  <!-- Modal: create room -->
-  <div id="modal-create-room" class="modal hidden">
-    <div class="modal-content">
-      <h3>部屋を作成</h3>
-      <input type="text" id="input-room-name" placeholder="部屋名（必須）" maxlength="20">
-      <input type="password" id="input-room-password" placeholder="パスワード（任意）" maxlength="32">
-      <div class="modal-buttons">
-        <button id="btn-cancel-create" class="btn-secondary">キャンセル</button>
-        <button id="btn-confirm-create" class="btn-primary">作成</button>
+  <!-- 初期設定 -->
+  <section id="view-setup" class="view hidden">
+    <header class="bar drag">
+      <span class="bar-title">LanTalk</span>
+      <button class="icon-btn btn-hide" title="隠す (Cmd/Ctrl+Shift+C)" aria-label="隠す">–</button>
+    </header>
+    <form id="setup-form" class="setup-body" autocomplete="off">
+      <p class="lead">同じLANにいる人と話す小さな部屋です。</p>
+      <label class="field">
+        <span>ニックネーム</span>
+        <input type="text" id="input-nickname" maxlength="16" placeholder="例: たこ">
+      </label>
+      <label class="field">
+        <span>参加先のIP</span>
+        <input type="text" id="input-host" maxlength="64" placeholder="空欄ならこの端末がホスト">
+        <small>誰かのLanTalkに入る場合は、その人の画面に出ているIPを入力します。</small>
+      </label>
+      <div class="actions">
+        <button type="button" id="btn-cancel-setup" class="btn btn-quiet hidden">戻る</button>
+        <button type="submit" id="btn-set-nickname" class="btn btn-primary">はじめる</button>
       </div>
+    </form>
+  </section>
+
+  <!-- 部屋一覧 -->
+  <section id="view-rooms" class="view hidden">
+    <header class="bar drag">
+      <button id="btn-profile" class="profile" title="名前と接続先を変更">
+        <span id="profile-avatar" class="avatar"></span>
+        <span id="user-name-display"></span>
+      </button>
+      <span id="host-display" class="chip" title="他の端末はこのIPを指定して参加"></span>
+      <button class="icon-btn btn-hide" title="隠す (Cmd/Ctrl+Shift+C)" aria-label="隠す">–</button>
+    </header>
+    <div id="conn-banner" class="banner hidden">接続できません。つなぎ直しています…</div>
+    <ul id="room-list" class="room-list"></ul>
+    <div id="no-rooms" class="empty">
+      <p>まだ部屋がありません</p>
+      <button id="btn-empty-create" class="btn btn-primary">最初の部屋をつくる</button>
     </div>
+    <footer class="foot">
+      <button id="btn-create-room" class="btn btn-quiet">＋ 部屋をつくる</button>
+    </footer>
+  </section>
+
+  <!-- チャット -->
+  <section id="view-chat" class="view hidden">
+    <header class="bar drag">
+      <button id="btn-back" class="icon-btn" title="部屋一覧へ" aria-label="部屋一覧へ">‹</button>
+      <div class="chat-title">
+        <span id="chat-room-name"></span>
+        <span id="chat-member-count"></span>
+      </div>
+      <button class="icon-btn btn-hide" title="隠す (Cmd/Ctrl+Shift+C)" aria-label="隠す">–</button>
+    </header>
+    <div id="conn-banner-chat" class="banner hidden">接続できません。つなぎ直しています…</div>
+    <div id="messages" aria-live="polite"></div>
+    <form id="chat-form" class="composer" autocomplete="off">
+      <input type="text" id="input-message" placeholder="メッセージを入力" maxlength="200">
+      <button type="submit" id="btn-send" class="send" aria-label="送信">↑</button>
+    </form>
+  </section>
+
+  <!-- 部屋をつくる -->
+  <div id="modal-create-room" class="sheet-backdrop hidden">
+    <form class="sheet" id="create-form" autocomplete="off">
+      <h3>部屋をつくる</h3>
+      <label class="field">
+        <span>部屋の名前</span>
+        <input type="text" id="input-room-name" maxlength="20">
+      </label>
+      <label class="field">
+        <span>パスワード(任意)</span>
+        <input type="password" id="input-room-password" maxlength="32">
+        <small>通信は暗号化されません。使い回しのパスワードは避けてください。</small>
+      </label>
+      <div class="actions">
+        <button type="button" id="btn-cancel-create" class="btn btn-quiet">キャンセル</button>
+        <button type="submit" id="btn-confirm-create" class="btn btn-primary">つくる</button>
+      </div>
+    </form>
   </div>
 
-  <!-- Modal: enter password -->
-  <div id="modal-password" class="modal hidden">
-    <div class="modal-content">
+  <!-- パスワード入力 -->
+  <div id="modal-password" class="sheet-backdrop hidden">
+    <form class="sheet" id="join-form" autocomplete="off">
       <h3 id="modal-password-title">パスワードを入力</h3>
-      <input type="password" id="input-join-password" placeholder="パスワード" maxlength="32">
-      <div class="modal-buttons">
-        <button id="btn-cancel-join" class="btn-secondary">キャンセル</button>
-        <button id="btn-confirm-join" class="btn-primary">入室</button>
+      <label class="field">
+        <span>パスワード</span>
+        <input type="password" id="input-join-password" maxlength="32">
+      </label>
+      <div class="actions">
+        <button type="button" id="btn-cancel-join" class="btn btn-quiet">キャンセル</button>
+        <button type="submit" id="btn-confirm-join" class="btn btn-primary">入る</button>
       </div>
-    </div>
+    </form>
   </div>
 
+  <div id="toast" class="toast hidden" role="status"></div>
 </div>
 <script src="renderer.js"></script>
 </body>
