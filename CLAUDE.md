@@ -30,6 +30,8 @@ LAN内で使う小さなチャット。Electron + WebSocket(`server.js`、メモ
 
 ## 既知の注意点
 
+- **接続元の制限(server.js):** WebSocketはOriginなし / `file://`(Electron) / 配信元と同じホスト(PWA)だけ許可。HTTPもWebSocketも、Hostヘッダーが IPアドレス か `localhost` でなければ拒否(DNSリバインディング対策)。そのため `http://mac.local:7823` のようなホスト名ではつながらない。IPで開く
+
 - 通信は `ws://` で暗号化されない。部屋のパスワードも平文(READMEに明記済み)。TLS化するなら自己署名証明書 + フィンガープリント確認
 - 履歴はメモリのみ。ホスト終了で消える
 - `electron/`(ルート直下と重複、内容は少し異なる)は未コミットのまま残している。ユーザーの確認なしに削除しない

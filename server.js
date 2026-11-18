@@ -4,6 +4,7 @@ const crypto = require('crypto')
 const http = require('http')
 const fs = require('fs')
 const path = require('path')
+const net = require('net')
 
 const SALT_ROUNDS = 10
 
@@ -22,6 +23,23 @@ function isPrivateIP(ip) {
   if (parts[0] === 192 && parts[1] === 168) return true
   if (parts[0] === 127) return true
   return false
+}
+
+// Hostヘッダーが IPアドレス か localhost のときだけ受け付ける(DNSリバインディング対策)
+function isTrustedHost(hostHeader) {
+  const host = String(hostHeader || '')
+  const name = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0]
+  return name === 'localhost' || net.isIP(name) !== 0
+}
+
+// WebSocketを開いてよい接続元か。
+// Originなし(Electron以外のクライアント)、Electronの file://、配信元と同じホスト(PWA)だけ通す。
+// 他サイトのページがユーザーのブラウザ経由でLAN内のサーバーに接続するのを防ぐ
+function isAllowedOrigin(req) {
+  if (!isTrustedHost(req.headers.host)) return false
+  const origin = req.headers.origin
+  if (!origin || origin === 'file://') return true
+  try { return new URL(origin).host === req.headers.host } catch { return false }
 }
 
 // ブラウザ/PWA向けに配信するファイル。ここに無いパスは返さない
@@ -44,11 +62,16 @@ function handleHttp(req, res) {
     res.writeHead(403).end('LAN only')
     return
   }
+  if (!isTrustedHost(req.headers.host)) {
+    res.writeHead(400).end('Bad host')
+    return
+  }
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405).end()
     return
   }
-  const pathname = new URL(req.url, 'http://x').pathname
+  // URLとして解釈できない値でも例外にならないよう、クエリを落とすだけにする
+  const pathname = String(req.url).split('?')[0]
   const entry = Object.hasOwn(STATIC, pathname) ? STATIC[pathname] : null
   if (!entry) {
     res.writeHead(404).end('Not found')
@@ -83,7 +106,11 @@ function broadcastRoomList(wss) {
 function startServer(port) {
   // 同じポートでHTTP(PWAの配信)とWebSocketの両方を受ける
   const httpServer = http.createServer(handleHttp)
-  const wss = new WebSocket.Server({ server: httpServer, maxPayload: 16 * 1024 })
+  const wss = new WebSocket.Server({
+    server: httpServer,
+    maxPayload: 16 * 1024,
+    verifyClient: ({ req }) => isAllowedOrigin(req)
+  })
   wss.httpServer = httpServer
   httpServer.on('error', (err) => console.error('[server]', err.message))
   httpServer.listen(port, () => console.log(`[server] HTTP + WebSocket listening on port ${port}`))
