@@ -1,4 +1,5 @@
 const PORT = window.api.port
+const WEB = window.api.web === true
 const UUID = /^[0-9a-f-]{36}$/i
 
 let ws
@@ -12,13 +13,15 @@ let allRooms = []
 let unreadCounts = {}
 let lastMsgUser = null
 let toastTimer = null
-let miniMode = localStorage.getItem('mini') === '1'
+let miniMode = !WEB && localStorage.getItem('mini') === '1'
 
 // ---- WebSocket ----
 function connect() {
   const gen = ++connectGen
   if (ws) ws.close()
-  ws = new WebSocket(`ws://${serverHost || 'localhost'}:${PORT}`)
+  // ブラウザ(PWA)は開いたページのホストにつなぐ。Electronは入力された接続先、空なら自分自身
+  const host = WEB ? location.hostname : (serverHost || 'localhost')
+  ws = new WebSocket(`${window.api.secure ? 'wss' : 'ws'}://${host}:${PORT}`)
   const sock = ws
 
   sock.onopen = () => setOnline(true)
@@ -131,7 +134,7 @@ function enterRooms() {
 }
 
 async function showHost() {
-  const ip = serverHost || await window.api.lanIp()
+  const ip = WEB ? '' : (serverHost || await window.api.lanIp())
   $('host-display').textContent = ip || ''
 }
 

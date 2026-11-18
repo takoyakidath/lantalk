@@ -20,6 +20,10 @@
       "server.js",
       "index.html",
       "style.css",
+      "shim.js",
+      "sw.js",
+      "manifest.webmanifest",
+      "icons/**/*",
       "node_modules/**/*"
     ],
     "mac": {

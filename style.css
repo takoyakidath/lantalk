@@ -320,3 +320,28 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--hover); }
   .sheet { animation: none; }
   .btn { transition: none; }
 }
+
+/* ---- ブラウザ / PWA ---- */
+.web { --paper-solid: #f6f9f7; }
+@media (prefers-color-scheme: dark) { .web { --paper-solid: #161f21; } }
+
+.web body { background: var(--paper-solid); }
+.web #app {
+  height: 100vh;
+  height: 100dvh;
+  max-width: 560px;
+  margin: 0 auto;
+  background: var(--paper-solid);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+/* 窓の操作はブラウザには無い */
+.web .btn-hide, .web #btn-mini, .web .field-host { display: none; }
+.web .drag { -webkit-app-region: no-drag; }
+/* iOSは16px未満の入力欄で画面が拡大されてしまう */
+.web input[type="text"], .web input[type="password"] { font-size: 16px; }
+.web body { user-select: auto; }

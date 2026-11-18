@@ -1,6 +1,9 @@
 const WebSocket = require('ws')
 const bcrypt = require('bcryptjs')
 const crypto = require('crypto')
+const http = require('http')
+const fs = require('fs')
+const path = require('path')
 
 const SALT_ROUNDS = 10
 
@@ -21,6 +24,46 @@ function isPrivateIP(ip) {
   return false
 }
 
+// ブラウザ/PWA向けに配信するファイル。ここに無いパスは返さない
+const STATIC = {
+  '/': ['index.html', 'text/html; charset=utf-8'],
+  '/index.html': ['index.html', 'text/html; charset=utf-8'],
+  '/style.css': ['style.css', 'text/css; charset=utf-8'],
+  '/renderer.js': ['renderer.js', 'text/javascript; charset=utf-8'],
+  '/shim.js': ['shim.js', 'text/javascript; charset=utf-8'],
+  '/sw.js': ['sw.js', 'text/javascript; charset=utf-8'],
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
+  '/icons/icon.svg': ['icons/icon.svg', 'image/svg+xml'],
+  '/icons/icon-180.png': ['icons/icon-180.png', 'image/png'],
+  '/icons/icon-192.png': ['icons/icon-192.png', 'image/png'],
+  '/icons/icon-512.png': ['icons/icon-512.png', 'image/png']
+}
+
+function handleHttp(req, res) {
+  if (!isPrivateIP(req.socket.remoteAddress)) {
+    res.writeHead(403).end('LAN only')
+    return
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405).end()
+    return
+  }
+  const pathname = new URL(req.url, 'http://x').pathname
+  const entry = Object.hasOwn(STATIC, pathname) ? STATIC[pathname] : null
+  if (!entry) {
+    res.writeHead(404).end('Not found')
+    return
+  }
+  fs.readFile(path.join(__dirname, entry[0]), (err, body) => {
+    if (err) {
+      res.writeHead(404).end('Not found')
+      return
+    }
+    res.writeHead(200, { 'Content-Type': entry[1], 'Cache-Control': 'no-cache' })
+    res.end(req.method === 'HEAD' ? undefined : body)
+  })
+}
+
 function buildRoomList() {
   return Array.from(rooms.values()).map(room => ({
     id: room.id,
@@ -38,8 +81,12 @@ function broadcastRoomList(wss) {
 }
 
 function startServer(port) {
-  const wss = new WebSocket.Server({ port })
-  console.log(`[server] WebSocket listening on port ${port}`)
+  // 同じポートでHTTP(PWAの配信)とWebSocketの両方を受ける
+  const httpServer = http.createServer(handleHttp)
+  const wss = new WebSocket.Server({ server: httpServer, maxPayload: 16 * 1024 })
+  wss.httpServer = httpServer
+  httpServer.on('error', (err) => console.error('[server]', err.message))
+  httpServer.listen(port, () => console.log(`[server] HTTP + WebSocket listening on port ${port}`))
 
   wss.on('connection', (ws, req) => {
     const clientIP = req.socket.remoteAddress || ''

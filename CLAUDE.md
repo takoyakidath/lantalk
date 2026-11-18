@@ -2,7 +2,7 @@
 
 LAN内で使う小さなチャット。Electron + WebSocket(`server.js`、メモリ保存、ポート7823)。
 
-## 状態(最終更新: 2026-11-08)
+## 状態(最終更新: 2026-11-18)
 
 ### コミット済み
 - 他端末からの参加(「参加先のIP」)、サーバー側の入力検証、READMEの整備
@@ -14,30 +14,25 @@ LAN内で使う小さなチャット。Electron + WebSocket(`server.js`、メモ
 - **ミニ表示**(`renderer.js` / `index.html` / `style.css`): 後ろから覗かれにくくするため、直近1件+入力欄+送信ボタンだけにする(320x88)。背景は半透明。「⤡」で小さく、「⤢」で戻す。`Esc` で隠す
 - 未確認: ライトモード、複数ディスプレイ(ホットコーナーは主ディスプレイのみ対象)
 
-### 待ち
-PWA版は、下の「未決」2点のユーザー回答待ち。回答が来たら実装に入る。着手前に `git status` / `git log` で他セッションの変更とぶつからないか確認する。
+### PWA版(実装済み・2026-11-18)
+- 決定(ユーザー回答): **HTTPのまま**、`pwa/` と `server/`(PHP+MySQL)は**削除して置き換え**
+- `server.js` が同じポート(7823)でHTTPとWebSocketを受ける。配信するのは `STATIC` の許可リストのファイルだけ(`index.html` `style.css` `renderer.js` `shim.js` `sw.js` `manifest.webmanifest` `icons/*`)。HTTPもプライベートIPのみ
+- `shim.js`: `window.api` が無いとき(=ブラウザ)の代用。`html.web` クラスが付き、CSSで窓操作(隠す/ミニ/参加先IP)を非表示にする。接続先は開いたページのホスト
+- `icons/`: `icon.svg` から生成したPNG(180/192/512)
+- HTTPのため、LANのIPではService Workerもchromeのインストールも効かない(iOSの「ホーム画面に追加」は可)。HTTPS化したくなったら `server.js` を `https.createServer` に変えて自己署名証明書を載せる(`shim.js` は `https:` なら `wss` を使うようになっている)
+- 実機のスマホでの確認は未実施(ブラウザ相当の環境で、スマホ幅の表示と送信まで確認)
 
 ## 次にやること
 
-1. PWA版の実装(下の方針)
-
-## PWA版の方針
-
-- Electron版のサーバーが、同じポート(7823)でHTTPとWebSocketの両方を受け、画面ファイルも配信する。スマホ・別PCは `http(s)://ホストIP:7823` を開いて参加する。部屋と履歴はElectron版と共通
-- 画面はElectron版を流用し、`manifest` / アイコン / Service Worker を足す
-- 既存の `pwa/`(`app.js`・`style.css`・アイコンが欠けている)と `server/`(PHP+MySQL)は、Electron版と通信できない別実装。上の方式に置き換える方針(ユーザーの了承待ち)
-- ホットコーナー・ミニ表示はElectron専用(ブラウザでは不可)
-
-### 未決(ユーザーに聞く)
-- **HTTP か 自己署名HTTPSか。** ホーム画面への追加とService WorkerはHTTPSか localhost が必要。LAN内のIPではHTTPだとChromeの「インストール」が出ず、iOS Safariの「ホーム画面に追加」のみになる。自己署名HTTPSなら暗号化の問題(下記)も同時に解決するが、初回に証明書の警告が出る
-- `pwa/` と `server/` を置き換えてよいか(`electron/` 配下の重複も含めて整理するか)
+- 実機のスマホで接続・ホーム画面追加を確認
+- `electron/`(ルート直下の旧コピー)の整理は未決。ユーザーの確認なしに削除しない
+- 履歴の永続化、HTTPS化は希望があれば
 
 ## 既知の注意点
 
 - 通信は `ws://` で暗号化されない。部屋のパスワードも平文(READMEに明記済み)。TLS化するなら自己署名証明書 + フィンガープリント確認
 - 履歴はメモリのみ。ホスト終了で消える
 - `electron/`(ルート直下と重複、内容は少し異なる)は未コミットのまま残している。ユーザーの確認なしに削除しない
-- `server/api/messages.php` はパスワード付き部屋の閲覧にも `X-Room-Password` を要求するよう修正済みだが、`server/` は未コミットで、MySQLでの動作確認はしていない
 
 ## 開発メモ
 
