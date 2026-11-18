@@ -8,6 +8,7 @@
   --hover: rgba(14, 124, 123, 0.08);
   --signal: #0e7c7b;
   --signal-ink: #ffffff;
+  --paper-mini: rgba(246, 249, 247, 0.5);
   --other-bubble: #e6ecea;
   --alert: #ff6b4a;
   --danger: #c43d2b;
@@ -26,6 +27,7 @@
     --hover: rgba(63, 191, 187, 0.12);
     --signal: #2bb5af;
     --signal-ink: #06201f;
+    --paper-mini: rgba(22, 31, 33, 0.5);
     --other-bubble: #2a3a3d;
     --danger: #ff8a73;
   }
@@ -268,6 +270,22 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--hover); }
   font-size: 18px; font-weight: 700;
 }
 .send:hover { filter: brightness(1.08); }
+
+/* ---- Mini (最新1件 + 入力欄) ---- */
+.mini-latest { display: none; }
+.mini .mini-latest {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 6px 0 14px;
+  min-height: 36px;
+}
+.mini-text {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ink);
+}
+.mini #app { background: var(--paper-mini); }
+.mini .bar, .mini #messages, .mini #conn-banner-chat { display: none; }
+.mini .composer { border-top: none; padding-top: 4px; }
 
 /* ---- Sheets ---- */
 .sheet-backdrop {

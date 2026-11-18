@@ -12,6 +12,7 @@ let allRooms = []
 let unreadCounts = {}
 let lastMsgUser = null
 let toastTimer = null
+let miniMode = localStorage.getItem('mini') === '1'
 
 // ---- WebSocket ----
 function connect() {
@@ -82,16 +83,32 @@ function handleMessage(msg) {
 }
 
 // ---- Views ----
-const VIEW_SIZES = { setup: [320, 380], rooms: [320, 440], chat: [320, 500] }
+const VIEW_SIZES = { setup: [320, 380], rooms: [320, 440], chat: [320, 500], mini: [320, 88] }
 
 function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'))
   $(`view-${name}`).classList.remove('hidden')
-  const [w, h] = VIEW_SIZES[name]
+  // ミニ表示はチャット画面だけ。後ろから覗かれにくいよう、最新1件と入力欄だけにする
+  const mini = name === 'chat' && miniMode
+  document.body.classList.toggle('mini', mini)
+  const [w, h] = VIEW_SIZES[mini ? 'mini' : name]
   window.api.resize(w, h)
   if (name === 'chat') setTimeout(() => $('input-message').focus(), 50)
   if (name === 'setup') setTimeout(() => $('input-nickname').focus(), 50)
 }
+
+function setMini(on) {
+  miniMode = on
+  localStorage.setItem('mini', on ? '1' : '0')
+  showView('chat')
+}
+$('btn-mini').addEventListener('click', () => setMini(true))
+$('btn-expand').addEventListener('click', () => setMini(false))
+
+// 出てきたときはすぐ入力できるようにする
+window.api.onFocus(() => {
+  if (!$('view-chat').classList.contains('hidden')) $('input-message').focus()
+})
 
 document.querySelectorAll('.btn-hide').forEach(b => b.addEventListener('click', () => window.api.hide()))
 
@@ -242,6 +259,10 @@ function closePasswordModal() {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return
+  if ($('modal-create-room').classList.contains('hidden') && $('modal-password').classList.contains('hidden')) {
+    window.api.hide()
+    return
+  }
   if (!$('modal-create-room').classList.contains('hidden')) closeCreateModal()
   else if (!$('modal-password').classList.contains('hidden')) closePasswordModal()
 })
@@ -254,6 +275,7 @@ function renderChat(room, msgs, memberCount) {
   container.replaceChildren()
   lastMsgUser = null
   msgs.forEach(m => appendMessage(m, false))
+  if (msgs.length === 0) $('mini-text').textContent = 'まだメッセージがありません'
   container.scrollTop = container.scrollHeight
 }
 
@@ -275,6 +297,7 @@ function appendMessage(msg, scroll = true) {
   row.append(body)
 
   container.append(row)
+  $('mini-text').textContent = `${isOwn ? 'あなた' : user}: ${msg.text}`
   if (scroll) container.scrollTop = container.scrollHeight
 }
 

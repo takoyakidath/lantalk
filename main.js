@@ -69,6 +69,7 @@ function createWindow() {
   })
 
   mainWindow.loadFile('index.html')
+  mainWindow.on('focus', () => mainWindow.webContents.send('window:focused'))
 
   mainWindow.on('close', (e) => {
     if (!app.isQuitting) {
@@ -82,6 +83,7 @@ app.whenReady().then(() => {
   startServer(PORT)
   createWindow()
   createTray()
+  watchCorner()
 
   globalShortcut.register('CommandOrControl+Shift+C', toggleWindow)
 })
@@ -94,6 +96,26 @@ ipcMain.handle('net:lan-ip', () => {
   }
   return null
 })
+
+// 右下の角にカーソルを置くと出てくる(ホットコーナー)
+function watchCorner() {
+  const DWELL_TICKS = 2 // 約0.2秒とどまったら反応。通過しただけでは出さない
+  let ticks = 0
+  let armed = true // 一度出したら、角から離れるまで再発動しない
+  setInterval(() => {
+    if (!mainWindow) return
+    const p = screen.getCursorScreenPoint()
+    const b = screen.getPrimaryDisplay().bounds
+    const inCorner = p.x >= b.x + b.width - 2 && p.y >= b.y + b.height - 2
+    if (!inCorner) { ticks = 0; armed = true; return }
+    if (!armed || mainWindow.isVisible()) return
+    if (++ticks >= DWELL_TICKS) {
+      armed = false
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  }, 100)
+}
 
 ipcMain.on('window:hide', () => mainWindow.hide())
 

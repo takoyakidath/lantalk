@@ -63,8 +63,13 @@
         <span id="chat-room-name"></span>
         <span id="chat-member-count"></span>
       </div>
+      <button id="btn-mini" class="icon-btn" title="小さくする" aria-label="小さくする">⤡</button>
       <button class="icon-btn btn-hide" title="隠す (Cmd/Ctrl+Shift+C)" aria-label="隠す">–</button>
     </header>
+    <div id="mini-latest" class="mini-latest drag">
+      <span id="mini-text" class="mini-text"></span>
+      <button id="btn-expand" class="icon-btn" title="大きくする" aria-label="大きくする">⤢</button>
+    </div>
     <div id="conn-banner-chat" class="banner hidden">接続できません。つなぎ直しています…</div>
     <div id="messages" aria-live="polite"></div>
     <form id="chat-form" class="composer" autocomplete="off">
