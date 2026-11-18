@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, screen, ipcMain, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, globalShortcut, screen, ipcMain, Tray, Menu, nativeImage, clipboard } = require('electron')
 const path = require('path')
 const os = require('os')
 const { startServer } = require('./server')
@@ -116,6 +116,12 @@ function watchCorner() {
     }
   }, 100)
 }
+
+ipcMain.handle('clipboard:write', (_, text) => {
+  if (typeof text !== 'string' || text.length > 200) return false
+  clipboard.writeText(text)
+  return true
+})
 
 ipcMain.on('window:hide', () => mainWindow.hide())
 

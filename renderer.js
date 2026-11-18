@@ -138,6 +138,19 @@ async function showHost() {
   $('host-display').textContent = ip || ''
 }
 
+// 押すと、他の端末のブラウザで開くURLをコピーする
+$('host-display').addEventListener('click', async () => {
+  const ip = $('host-display').textContent
+  if (!ip) return
+  const url = `http://${ip}:${PORT}`
+  try {
+    await window.api.copy(url)
+    showToast(`${url} をコピーしました`)
+  } catch {
+    showToast('コピーできませんでした')
+  }
+})
+
 $('btn-profile').addEventListener('click', () => {
   $('input-nickname').value = nickname
   $('input-host').value = serverHost

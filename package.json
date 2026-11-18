@@ -77,11 +77,11 @@
   "homepage": "https://github.com/takoyakidath/lantalk#readme",
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "electron": "^41.2.0",
     "uuid": "^13.0.0",
     "ws": "^8.20.0"
   },
   "devDependencies": {
+    "electron": "^41.2.0",
     "electron-builder": "^25.1.8"
   }
 }

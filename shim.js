@@ -7,6 +7,7 @@ if (!window.api) {
     port: Number(location.port) || (secure ? 443 : 80),
     hide() {},
     resize() {},
+    copy: async (text) => { await navigator.clipboard.writeText(text); return true },
     lanIp: async () => null,
     onFocus() {}
   }

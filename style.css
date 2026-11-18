@@ -103,6 +103,8 @@ button { cursor: pointer; }
   padding: 2px 8px;
   border-radius: 999px;
   user-select: text;
+  border: none;
+  cursor: pointer;
   white-space: nowrap;
   max-width: 120px;
   overflow: hidden;
@@ -285,6 +287,7 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--hover); }
 }
 .mini #app { background: var(--paper-mini); }
 .mini .bar, .mini #messages, .mini #conn-banner-chat { display: none; }
+.mini .toast { top: 6px; }
 .mini .composer { border-top: none; padding-top: 4px; }
 
 /* ---- Sheets ---- */
@@ -308,7 +311,7 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--hover); }
 
 /* ---- Toast ---- */
 .toast {
-  position: absolute; left: 12px; right: 12px; bottom: 64px; z-index: 100;
+  position: absolute; left: 12px; right: 12px; top: 52px; z-index: 100;
   background: var(--ink); color: var(--paper);
   padding: 8px 12px;
   border-radius: 10px;
