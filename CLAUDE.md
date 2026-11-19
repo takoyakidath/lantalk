@@ -59,11 +59,10 @@ LAN内で使う小さなチャット。Electron + WebSocket(`server.js`、メモ
 - 未対応: 部屋のパスワードの平文通信、認証(アカウント)なし(設計)、開発用ビルドツールの脆弱性(配布物には入らない)、アプリ全体のショートカット `Cmd+Shift+C` がブラウザの「要素を調べる」を奪う件(**ユーザー決定: このまま変えない**、2026-11-19)
 - 未検証: 空の部屋が30分で片付く処理(時間がかかるため)
 
-### リリースの待ち条件(ユーザー指示 2026-11-19)
-- 「**全て解決したらReleasesを作る**」。条件が揃うまで、タグは作らない・pushしない
-- 揃っていないもの: (1) ~~`Cmd+Shift+C` の判断~~ → このままで確定、(2) 実機の確認(スマホ接続・QR、通知、2台目PCの自動検出)、(3) 未検証(空の部屋の片付け、Windows/Linuxのビルド)
-- 揃ったら: `git tag v1.0.0 && git push origin v1.0.0` → Actionsがインストーラーを作り、Releasesに**下書き**を置く。公開は人が決める。リポジトリは非公開(PRIVATE)
-- 作る前に、条件が揃ったかをユーザーに確認する
+### リリース(完了・2026-11-19)
+- ユーザーが実機で動作を確認し、「リリースして」と指示 → `v1.0.0` をタグ付け・push。Actionsがmac(arm64/x64 dmg)・Windows(exe)・Linux(AppImage)をビルドし、Releasesに公開した: https://github.com/takoyakidath/lantalk/releases/tag/v1.0.0
+- リポジトリは非公開(PRIVATE)。署名なし(初回起動で警告)。Windows/Linuxの実機動作は未確認
+- 次のリリース: `package.json` の `version` を上げて、`git tag -a vX.Y.Z` → `git push origin vX.Y.Z`(下書きで作られるので、`gh release edit vX.Y.Z --draft=false` で公開)
 
 ## 次にやること
 
