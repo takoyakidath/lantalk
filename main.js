@@ -261,8 +261,12 @@ ipcMain.handle('clipboard:write', (_, text) => {
 
 ipcMain.on('window:hide', () => mainWindow.hide())
 
-ipcMain.on('window:resize', (_, { w, h }) => {
-  if (!mainWindow) return
+ipcMain.on('window:resize', (_, size) => {
+  if (!mainWindow || !size) return
+  // 画面から来る値は信用しない: 数値だけを受け、現実的な範囲に収める
+  const clamp = (n) => Math.min(1000, Math.max(80, Math.round(n)))
+  if (!Number.isFinite(size.w) || !Number.isFinite(size.h)) return
+  const w = clamp(size.w), h = clamp(size.h)
   const { workArea } = screen.getPrimaryDisplay()
   mainWindow.setSize(w, h)
   mainWindow.setPosition(

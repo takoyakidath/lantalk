@@ -6,6 +6,15 @@ let ws
 let connectGen = 0
 let nickname = localStorage.getItem('nickname') || ''
 let serverHost = localStorage.getItem('serverHost') || ''
+
+// この端末を見分ける値。HTTPのLANではcrypto.randomUUIDが使えないので、getRandomValuesで作る。
+// サーバーはこの値をそのまま配らず、別の値に変えて配る(他人のIDを名乗れないように)
+let clientId = localStorage.getItem('clientId')
+if (!clientId) {
+  clientId = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')
+  localStorage.setItem('clientId', clientId)
+}
+let myTag = '' // サーバーが入室時に教えてくれる、自分の発言者ID
 let currentRoomId = null
 let pendingJoinRoomId = null
 let pendingCreatePassword = ''
@@ -59,12 +68,13 @@ function handleMessage(msg) {
 
     case 'room:created':
       // 作成者はパスワード付きでもそのまま入室する
-      send({ type: 'room:join', roomId: msg.room.id, nickname, password: pendingCreatePassword })
+      send({ type: 'room:join', roomId: msg.room.id, nickname, password: pendingCreatePassword, clientId })
       pendingCreatePassword = ''
       break
 
     case 'room:joined':
       currentRoomId = msg.room.id
+      myTag = String(msg.you || '')
       unreadCounts[msg.room.id] = 0
       renderChat(msg.room, msg.messages, msg.memberCount)
       showView('chat')
@@ -75,7 +85,7 @@ function handleMessage(msg) {
       break
 
     case 'chat:message':
-      if (msg.message.user !== nickname) window.api.notify()
+      if (!myTag || msg.message.userTag !== myTag) window.api.notify()
       if (msg.message.roomId === currentRoomId) {
         appendMessage(msg.message)
       } else {
@@ -266,7 +276,7 @@ function doJoin(roomId, password) {
     currentRoomId = null
   }
   unreadCounts[roomId] = 0
-  send({ type: 'room:join', roomId, password, nickname })
+  send({ type: 'room:join', roomId, password, nickname, clientId })
 }
 
 // ---- Create room ----
@@ -336,7 +346,7 @@ function renderChat(room, msgs, memberCount) {
 function appendMessage(msg, scroll = true) {
   const container = $('messages')
   const user = String(msg.user || '')
-  const isOwn = user === nickname
+  const isOwn = !!myTag && msg.userTag === myTag // 名前ではなくサーバーの識別子で判定する(同名のなりすまし対策)
   const cont = lastMsgUser === user // 同じ人の連続投稿は名前とアイコンを省く
   lastMsgUser = user
 

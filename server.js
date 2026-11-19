@@ -8,10 +8,47 @@ const net = require('net')
 
 const SALT_ROUNDS = 10
 
+// 1台のLAN端末が、ホストのメモリやCPUを使い切れないようにする上限
+const MAX_ROOMS = 50
+const MAX_CONN_PER_IP = 20
+const MAX_CONN_TOTAL = 200
+const EMPTY_ROOM_TTL = 30 * 60 * 1000 // 誰もいない部屋は30分で片付ける
+
+// 発言者の識別用。クライアントが送るclientIdは、そのままは配らず、サーバーだけが知る鍵で別の値にして配る
+// (配られた値からclientIdは分からないので、他人のclientIdを名乗れない)
+const SECRET = crypto.randomBytes(16)
+const tagOf = (clientId) => crypto.createHmac('sha256', SECRET).update(clientId).digest('hex').slice(0, 12)
+
+// 制御文字と、表示の向きを入れ替える文字(RTL override など)は取り除く
+const clean = (s) => String(s).replace(/[\u0000-\u0008\u000B-\u001F\u007F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '')
+
+// 一定時間あたりの回数制限
+function makeLimiter(max, windowMs) {
+  const hits = new Map() // key -> { n, reset }
+  return {
+    hit(key) { // 数えて、上限以内なら true
+      const now = Date.now()
+      let e = hits.get(key)
+      if (!e || now > e.reset) { e = { n: 0, reset: now + windowMs }; hits.set(key, e) }
+      e.n++
+      return e.n <= max
+    },
+    refund(key) { // 数えた1回を取り消す
+      const e = hits.get(key)
+      if (e && e.n > 0) e.n--
+    },
+    prune() {
+      const now = Date.now()
+      for (const [k, e] of hits) if (now > e.reset) hits.delete(k)
+    }
+  }
+}
+
 // In-memory storage
 const rooms = new Map()       // roomId -> { id, name, passwordHash, createdAt }
 const messages = new Map()    // roomId -> [message]
 const roomMembers = new Map() // roomId -> Set of ws connections
+// room: { id, name, passwordHash, createdAt, emptySince }
 
 function isPrivateIP(ip) {
   ip = (ip || '').replace(/^::ffff:/, '')
@@ -82,7 +119,14 @@ function handleHttp(req, res) {
       res.writeHead(404).end('Not found')
       return
     }
-    res.writeHead(200, { 'Content-Type': entry[1], 'Cache-Control': 'no-cache' })
+    res.writeHead(200, {
+      'Content-Type': entry[1],
+      'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY', // 他のサイトのiframeに埋め込ませない
+      'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    })
     res.end(req.method === 'HEAD' ? undefined : body)
   })
 }
@@ -115,121 +159,198 @@ function startServer(port) {
   httpServer.on('error', (err) => console.error('[server]', err.message))
   httpServer.listen(port, () => console.log(`[server] HTTP + WebSocket listening on port ${port}`))
 
+  const ipConns = new Map()                    // ip -> 接続数
+  const joinTries = makeLimiter(5, 60_000)     // パスワード付きの部屋への入室の試行: 1分に5回まで
+  const createRate = makeLimiter(10, 60_000)   // 部屋の作成: 1分に10回まで
+  const msgRate = makeLimiter(40, 10_000)      // 1接続あたりのメッセージ: 10秒に40通まで
+
+  // 部屋一覧は、短い間に何度変わってもまとめて1回だけ配る
+  let listTimer = null
+  const scheduleRoomList = () => {
+    if (listTimer) return
+    listTimer = setTimeout(() => { listTimer = null; broadcastRoomList(wss) }, 150)
+  }
+
+  // 誰もいない部屋を片付け、使い終わった回数の記録を捨てる
+  const sweep = setInterval(() => {
+    const now = Date.now()
+    let removed = false
+    for (const room of Array.from(rooms.values())) {
+      const members = roomMembers.get(room.id)
+      if (members && members.size > 0) { room.emptySince = null; continue }
+      room.emptySince = room.emptySince || now
+      if (now - room.emptySince > EMPTY_ROOM_TTL) {
+        rooms.delete(room.id); messages.delete(room.id); roomMembers.delete(room.id)
+        removed = true
+      }
+    }
+    joinTries.prune(); createRate.prune(); msgRate.prune()
+    if (removed) scheduleRoomList()
+  }, 60_000)
+
+  // 切れたまま残った接続(ゴースト)を片付ける
+  const heartbeat = setInterval(() => {
+    wss.clients.forEach(c => {
+      if (c.isAlive === false) return c.terminate()
+      c.isAlive = false
+      c.ping()
+    })
+  }, 30_000)
+  sweep.unref(); heartbeat.unref()
+  wss.on('close', () => { clearInterval(sweep); clearInterval(heartbeat); clearTimeout(listTimer) })
+
   wss.on('connection', (ws, req) => {
-    const clientIP = req.socket.remoteAddress || ''
-    if (!isPrivateIP(clientIP)) {
+    const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
+    if (!isPrivateIP(ip)) {
       ws.close(1008, 'LAN only')
       return
     }
+    const conns = (ipConns.get(ip) || 0) + 1
+    if (conns > MAX_CONN_PER_IP || wss.clients.size > MAX_CONN_TOTAL) {
+      ws.close(1013, 'Too many connections')
+      return
+    }
+    ipConns.set(ip, conns)
+
+    ws.isAlive = true
+    ws.on('pong', () => { ws.isAlive = true })
+    ws.on('error', () => {})
 
     ws.joinedRooms = new Set()
     ws.nickname = 'Anonymous'
+    ws.id = crypto.randomUUID()
+    ws.tag = tagOf(ws.id)
+
+    const reply = (obj) => ws.send(JSON.stringify(obj))
+    const fail = (message) => reply({ type: 'room:error', message })
 
     // Send room list on connect
-    ws.send(JSON.stringify({ type: 'room:list', rooms: buildRoomList() }))
+    reply({ type: 'room:list', rooms: buildRoomList() })
 
     ws.on('message', async (data) => {
+      if (!msgRate.hit(ws.id)) return // 送りすぎた分は捨てる
+
       let msg
       try { msg = JSON.parse(data.toString()) } catch { return }
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return
 
-      switch (msg.type) {
+      try {
+        switch (msg.type) {
 
-        case 'room:list': {
-          ws.send(JSON.stringify({ type: 'room:list', rooms: buildRoomList() }))
-          break
-        }
-
-        case 'room:create': {
-          const name = String(msg.name || '').trim().slice(0, 20)
-          if (!name) {
-            ws.send(JSON.stringify({ type: 'room:error', message: '部屋名を入力してください' }))
+          case 'room:list': {
+            reply({ type: 'room:list', rooms: buildRoomList() })
             break
           }
-          const id = crypto.randomUUID()
-          let passwordHash = null
-          if (typeof msg.password === 'string' && msg.password.trim()) {
-            passwordHash = await bcrypt.hash(msg.password.slice(0, 32), SALT_ROUNDS)
-          }
-          rooms.set(id, { id, name, passwordHash, createdAt: Date.now() })
-          messages.set(id, [])
-          roomMembers.set(id, new Set())
-          broadcastRoomList(wss)
-          ws.send(JSON.stringify({ type: 'room:created', room: { id, name } }))
-          break
-        }
 
-        case 'room:join': {
-          const room = rooms.get(msg.roomId)
-          if (!room) {
-            ws.send(JSON.stringify({ type: 'room:error', message: '部屋が見つかりません' }))
-            break
-          }
-          if (room.passwordHash) {
-            const valid = typeof msg.password === 'string' && msg.password
-              ? await bcrypt.compare(msg.password.slice(0, 32), room.passwordHash)
-              : false
-            if (!valid) {
-              ws.send(JSON.stringify({ type: 'room:error', message: 'パスワードが違います' }))
-              break
+          case 'room:create': {
+            const name = clean(msg.name || '').trim().slice(0, 20)
+            if (!name) { fail('部屋名を入力してください'); break }
+            if (!createRate.hit(ip)) { fail('部屋をつくる回数が多すぎます。しばらくしてからやり直してください'); break }
+            if (rooms.size >= MAX_ROOMS) { fail('部屋が多すぎます。使われていない部屋が片付くまでお待ちください'); break }
+            const id = crypto.randomUUID()
+            let passwordHash = null
+            if (typeof msg.password === 'string' && msg.password.trim()) {
+              passwordHash = await bcrypt.hash(msg.password.slice(0, 32), SALT_ROUNDS)
             }
-          }
-          if (typeof msg.nickname === 'string' && msg.nickname.trim()) ws.nickname = msg.nickname.trim().slice(0, 16)
-          const members = roomMembers.get(room.id)
-          members.add(ws)
-          ws.joinedRooms.add(room.id)
-          ws.send(JSON.stringify({
-            type: 'room:joined',
-            room: { id: room.id, name: room.name },
-            messages: (messages.get(room.id) || []).slice(-50),
-            memberCount: members.size
-          }))
-          broadcastRoomList(wss)
-          break
-        }
-
-        case 'room:leave': {
-          const members = roomMembers.get(msg.roomId)
-          if (members) {
-            members.delete(ws)
-            ws.joinedRooms.delete(msg.roomId)
-          }
-          broadcastRoomList(wss)
-          break
-        }
-
-        case 'chat:send': {
-          const { roomId, text } = msg
-          if (typeof text !== 'string' || !text.trim()) break
-          const members = roomMembers.get(roomId)
-          if (!members || !members.has(ws)) {
-            ws.send(JSON.stringify({ type: 'room:error', message: '部屋に参加していません' }))
+            rooms.set(id, { id, name, passwordHash, createdAt: Date.now(), emptySince: Date.now() })
+            messages.set(id, [])
+            roomMembers.set(id, new Set())
+            scheduleRoomList()
+            reply({ type: 'room:created', room: { id, name } })
             break
           }
-          const message = {
-            id: crypto.randomUUID(),
-            roomId,
-            user: ws.nickname,
-            text: text.trim().slice(0, 200),
-            createdAt: Date.now()
+
+          case 'room:join': {
+            const room = typeof msg.roomId === 'string' ? rooms.get(msg.roomId) : null
+            if (!room) { fail('部屋が見つかりません'); break }
+            if (room.passwordHash) {
+              // パスワードの総当たり対策。試行は照合の「前」に数える
+              // (照合は時間がかかるので、後で数えると、一斉に送られた分がすべてすり抜ける)
+              if (!joinTries.hit(ip)) { fail('試行が多すぎます。しばらくしてからやり直してください'); break }
+              const valid = typeof msg.password === 'string' && msg.password
+                ? await bcrypt.compare(msg.password.slice(0, 32), room.passwordHash)
+                : false
+              if (!valid) { fail('パスワードが違います'); break }
+              joinTries.refund(ip) // 正しいパスワードで入れた分は、数えなかったことにする
+            }
+
+            // 発言者の識別。同じ端末が入り直したときは同じ値になる
+            if (typeof msg.clientId === 'string' && /^[\w-]{8,64}$/.test(msg.clientId)) {
+              ws.tag = tagOf(msg.clientId)
+            }
+            const wanted = typeof msg.nickname === 'string' && clean(msg.nickname).trim()
+              ? clean(msg.nickname).trim().slice(0, 16)
+              : ws.nickname
+            const members = roomMembers.get(room.id)
+            // 同じ部屋で、別の人が同じ名前を名乗ってなりすますのを防ぐ
+            const taken = Array.from(members).some(m =>
+              m !== ws && m.tag !== ws.tag && m.nickname.toLowerCase() === wanted.toLowerCase())
+            if (taken) { fail('その名前はこの部屋で使われています。別の名前にしてください'); break }
+
+            ws.nickname = wanted
+            members.add(ws)
+            ws.joinedRooms.add(room.id)
+            room.emptySince = null
+            reply({
+              type: 'room:joined',
+              room: { id: room.id, name: room.name },
+              messages: (messages.get(room.id) || []).slice(-50),
+              memberCount: members.size,
+              you: ws.tag
+            })
+            scheduleRoomList()
+            break
           }
-          const log = messages.get(roomId)
-          log.push(message)
-          if (log.length > 200) log.shift()
-          const payload = JSON.stringify({ type: 'chat:message', message })
-          members.forEach(c => {
-            if (c.readyState === WebSocket.OPEN) c.send(payload)
-          })
-          break
+
+          case 'room:leave': {
+            const members = typeof msg.roomId === 'string' ? roomMembers.get(msg.roomId) : null
+            if (members) {
+              members.delete(ws)
+              ws.joinedRooms.delete(msg.roomId)
+            }
+            scheduleRoomList()
+            break
+          }
+
+          case 'chat:send': {
+            const { roomId } = msg
+            if (typeof msg.text !== 'string') break
+            const text = clean(msg.text).trim()
+            if (!text) break
+            const members = typeof roomId === 'string' ? roomMembers.get(roomId) : null
+            if (!members || !members.has(ws)) { fail('部屋に参加していません'); break }
+            const message = {
+              id: crypto.randomUUID(),
+              roomId,
+              user: ws.nickname,
+              userTag: ws.tag,
+              text: text.slice(0, 200),
+              createdAt: Date.now()
+            }
+            const log = messages.get(roomId)
+            log.push(message)
+            if (log.length > 200) log.shift()
+            const payload = JSON.stringify({ type: 'chat:message', message })
+            members.forEach(c => {
+              if (c.readyState === WebSocket.OPEN) c.send(payload)
+            })
+            break
+          }
         }
+      } catch (err) {
+        // 1通の不正なメッセージで、サーバー全体を止めない
+        console.error('[server] message error:', err.message)
       }
     })
 
     ws.on('close', () => {
+      const left = (ipConns.get(ip) || 1) - 1
+      if (left <= 0) ipConns.delete(ip); else ipConns.set(ip, left)
       ws.joinedRooms.forEach(roomId => {
         const members = roomMembers.get(roomId)
         if (members) members.delete(ws)
       })
-      broadcastRoomList(wss)
+      scheduleRoomList()
     })
   })
 
