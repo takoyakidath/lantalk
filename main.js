@@ -116,7 +116,7 @@ ipcMain.handle('net:lan-ip', () => {
 // 使われていないときは薄くぼかして、後ろから読まれにくくするために使う
 let hover = null
 function sendState() {
-  if (!mainWindow || mainWindow.webContents.isLoading()) return
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoading()) return
   mainWindow.webContents.send('window:state', { hover: !!hover, focus: mainWindow.isFocused() })
 }
 
@@ -125,8 +125,8 @@ function watchCursor() {
   const DWELL_TICKS = 2 // 約0.2秒とどまったら反応。通過しただけでは出さない
   let ticks = 0
   let armed = true // 一度出したら、角から離れるまで再発動しない
-  setInterval(() => {
-    if (!mainWindow) return
+  const timer = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return // 終了処理中は何もしない
     const p = screen.getCursorScreenPoint()
 
     const wb = mainWindow.getBounds()
@@ -144,6 +144,7 @@ function watchCursor() {
       mainWindow.focus()
     }
   }, 100)
+  app.on('before-quit', () => clearInterval(timer))
 }
 
 // ---- 新着の通知(画面の右上にアイコンと点だけ出す。名前も本文も出さない) ----
@@ -174,6 +175,7 @@ function createNotifyWindow() {
 }
 
 function notify() {
+  if (!mainWindow || mainWindow.isDestroyed() || !notifyWindow || notifyWindow.isDestroyed()) return
   if (mainWindow.isVisible() && mainWindow.isFocused()) return // 見ている最中は出さない
   unseen++
   if (process.platform === 'darwin' && tray) tray.setTitle('•')
@@ -186,7 +188,7 @@ function clearUnseen() {
   unseen = 0
   if (process.platform === 'darwin' && tray) tray.setTitle('')
   clearTimeout(notifyTimer)
-  if (notifyWindow) notifyWindow.hide()
+  if (notifyWindow && !notifyWindow.isDestroyed()) notifyWindow.hide()
 }
 
 ipcMain.on('notify', (e) => {
