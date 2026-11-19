@@ -9,7 +9,9 @@ if (!window.api) {
     resize() {},
     copy: async (text) => { await navigator.clipboard.writeText(text); return true },
     lanIp: async () => null,
-    onFocus() {}
+    onFocus() {},
+    onState() {},
+    notify() {}
   }
   document.documentElement.classList.add('web')
 

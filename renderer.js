@@ -75,6 +75,7 @@ function handleMessage(msg) {
       break
 
     case 'chat:message':
+      if (msg.message.user !== nickname) window.api.notify()
       if (msg.message.roomId === currentRoomId) {
         appendMessage(msg.message)
       } else {
@@ -112,6 +113,9 @@ $('btn-expand').addEventListener('click', () => setMini(false))
 window.api.onFocus(() => {
   if (!$('view-chat').classList.contains('hidden')) $('input-message').focus()
 })
+
+// 使われていない間(フォーカスもカーソルも無い)は、薄くしてぼかす
+window.api.onState((s) => document.body.classList.toggle('idle', !s.hover && !s.focus))
 
 document.querySelectorAll('.btn-hide').forEach(b => b.addEventListener('click', () => window.api.hide()))
 

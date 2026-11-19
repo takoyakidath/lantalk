@@ -290,6 +290,22 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--hover); }
 .mini .toast { top: 6px; }
 .mini .composer { border-top: none; padding-top: 4px; }
 
+/* ---- 使われていないときは薄く・ぼかす(後ろから読まれにくくする) ---- */
+:root {
+  --idle-opacity: 0.4;
+  --idle-opacity-mini: 0.32;
+  --idle-blur: 5px;
+}
+#app { transition: opacity 0.25s ease; }
+#messages, .mini-text, .room-list, .chat-title, .composer input { transition: filter 0.25s ease; }
+.idle #app { opacity: var(--idle-opacity); }
+.idle.mini #app { opacity: var(--idle-opacity-mini); }
+.idle #messages, .idle .mini-text, .idle .room-list, .idle .chat-title, .idle .composer input { filter: blur(var(--idle-blur)); }
+
+@media (prefers-reduced-motion: reduce) {
+  #app, #messages, .mini-text, .room-list, .chat-title, .composer input { transition: none; }
+}
+
 /* ---- Sheets ---- */
 .sheet-backdrop {
   position: absolute; inset: 0; z-index: 50;
