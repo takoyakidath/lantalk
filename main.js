@@ -4,7 +4,7 @@ const os = require('os')
 const net = require('net')
 const QRCode = require('qrcode')
 const { Bonjour } = require('bonjour-service')
-const { startServer } = require('./server')
+const { startServer, isPrivateIP } = require('./server')
 
 const PORT = 7823
 let mainWindow
@@ -203,7 +203,8 @@ ipcMain.on('window:open', (e) => {
 // ---- 同じLANのLanTalkを見つける(mDNS)。IPを手で打たなくて済むようにする ----
 const SERVICE_TYPE = 'lantalk'
 let bonjour
-let nearby = new Map() // key -> { name, host }
+const MAX_NEARBY = 20
+let nearby = new Map() // `${名前}|${IP}` -> { name, host }
 
 function myAddresses() {
   const set = new Set()
@@ -226,13 +227,19 @@ function startDiscovery() {
   const mine = myAddresses()
   const browser = bonjour.find({ type: SERVICE_TYPE })
   browser.on('up', (svc) => {
-    const host = (svc.addresses || []).find(a => net.isIPv4(a))
-    if (!host || mine.has(host)) return // 自分自身は一覧に出さない
-    nearby.set(svc.fqdn || svc.name, { name: String(svc.name).replace(/^LanTalk-/, '').slice(0, 40), host })
+    // 広告は誰でも出せる。LAN内のIPだけを信用し、自分自身は一覧に出さない
+    const host = (svc.addresses || []).find(a => net.isIPv4(a) && isPrivateIP(a))
+    if (!host || mine.has(host)) return
+    // 名前+IPで管理する。後から同じ名前を名乗られても、既存の項目のIPは書き換わらない
+    const key = `${svc.fqdn || svc.name}|${host}`
+    if (!nearby.has(key) && nearby.size >= MAX_NEARBY) return
+    nearby.set(key, { name: String(svc.name).replace(/^LanTalk-/, '').slice(0, 40), host })
     pushNearby()
   })
   browser.on('down', (svc) => {
-    nearby.delete(svc.fqdn || svc.name)
+    for (const key of Array.from(nearby.keys())) {
+      if (key.startsWith(`${svc.fqdn || svc.name}|`)) nearby.delete(key)
+    }
     pushNearby()
   })
 }

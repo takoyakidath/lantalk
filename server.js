@@ -236,4 +236,4 @@ function startServer(port) {
   return wss
 }
 
-module.exports = { startServer }
+module.exports = { startServer, isPrivateIP }

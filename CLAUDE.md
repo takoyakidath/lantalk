@@ -34,6 +34,7 @@ LAN内で使う小さなチャット。Electron + WebSocket(`server.js`、メモ
 ### LAN専用のまま作り直した点(2026-11-19)
 - 方針(ユーザー決定): クラウドの常設サーバーは**やらない**。LAN内で完結する設計を維持(クラウド版は将来、別製品として)
 - **近くのLanTalk(mDNS):** `main.js` の `startDiscovery`(`bonjour-service`、サービス種別 `_lantalk._tcp`)。自分自身は一覧から除外。設定画面に一覧が出て、選ぶと参加先IPが入る
+- **近くのホストの信頼:** mDNSの広告は誰でも出せる(偽ホストの可能性)。対策は、LAN内のIPだけ採用・名前+IPで管理(後から名乗られてもIPは書き換わらない)・最大20件・IPを名前の横に表示・選んでも入力欄に入るだけで自動接続しない。ホストの本人確認(公開鍵の固定など)はTLSが前提になるため未対応。信頼できないLANでは、部屋のパスワードを使い回さない
 - **スマホで参加(QR):** 部屋一覧のIPチップ → QR+URLの画面(`qrcode`)。`index.html` のCSPに `img-src data:` を追加
 - **配布:** `.github/workflows/release.yml`(タグ `v*` のpushでmac/Win/Linuxをビルドし、Releasesに下書きで置く)。`package.json` の `build.publish` は github / draft。署名なし。**GitHubへのpush・公開はまだしていない**
 - **自己署名HTTPSは採用しない:** Chromeは証明書が信頼されていないとインストールもService Workerも許可しないため、狙い(インストールしやすさ)を満たさない。HTTPのまま、QRで開いて「ホーム画面に追加」
