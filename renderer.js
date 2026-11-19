@@ -351,7 +351,7 @@ function appendMessage(msg, scroll = true) {
   lastMsgUser = user
 
   const row = el('div', `message ${isOwn ? 'own' : 'other'}${cont ? ' cont' : ''}`)
-  if (!isOwn) row.append(avatarEl(user))
+  if (!isOwn) row.append(avatarEl(user, false, String(msg.userTag || user)))
 
   const body = el('div', 'msg-body')
   if (!isOwn && !cont) body.append(el('span', 'msg-user', user))
@@ -393,16 +393,17 @@ function el(tag, className, text) {
 }
 
 // ニックネームから色を決めて、同じ人は常に同じ色で表示する
-function paintAvatar(node, name) {
+// seed には、発言者の識別子があればそれを渡す。名前が似ていても、別の人なら色が変わる
+function paintAvatar(node, name, seed = name) {
   let h = 0
-  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 360
+  for (const ch of seed) h = (h * 31 + ch.codePointAt(0)) % 360
   node.style.setProperty('--hue', String(h))
   node.textContent = [...name][0] || '?'
 }
 
-function avatarEl(name, square = false) {
+function avatarEl(name, square = false, seed = name) {
   const a = el('span', square ? 'avatar sq' : 'avatar')
-  paintAvatar(a, name)
+  paintAvatar(a, name, seed)
   return a
 }
 

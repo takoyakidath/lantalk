@@ -23,10 +23,22 @@ const tagOf = (clientId) => crypto.createHmac('sha256', SECRET).update(clientId)
 // ゼロ幅接合子(絵文字の組み合わせに使われる)は残す
 const clean = (s) => String(s).replace(/[\u0000-\u0008\u000B-\u001F\u007F\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/g, '')
 
-// 名前: 見えない文字(ゼロ幅など)を含むフォーマット文字と制御文字をすべて取り除き、空白を詰める
-const cleanName = (s) => String(s).replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/\s+/g, ' ').trim()
-// 同じ名前かどうかの比較用。全角と半角、大文字と小文字などの違いを同じとみなす
-const nameKey = (s) => cleanName(s).normalize('NFKC').toLowerCase()
+// 名前: 制御文字・フォーマット文字・「表示されない」文字(ゼロ幅、ハングルの空白、点字の空白など)を
+// すべて取り除き、空白を詰める。見えない文字を足して別の名前に見せかけるのを防ぐ
+const cleanName = (s) => String(s)
+  .replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800\u3164\u115F\u1160\uFFA0\u180E]/gu, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+
+// ラテン文字と見分けがつかない、キリル文字・ギリシャ文字など(UTS #39 の代表的なもの)
+const LOOKALIKE = {
+  'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x', 'у': 'y', 'і': 'i', 'ј': 'j', 'ѕ': 's',
+  'ԁ': 'd', 'һ': 'h', 'ԛ': 'q', 'ԝ': 'w', 'ӏ': 'l', 'ɡ': 'g', 'ı': 'i', 'ℓ': 'l',
+  'ο': 'o', 'ν': 'v', 'ι': 'i', 'ρ': 'p', 'υ': 'u', 'κ': 'k', 'α': 'a', 'χ': 'x'
+}
+// 同じ名前かどうかの比較用。全角と半角、大文字と小文字、見た目が同じ文字の違いを、同じとみなす。
+// (濁点など、日本語の区別は保つ。分解して記号を消すことはしない)
+const nameKey = (s) => Array.from(cleanName(s).normalize('NFKC').toLowerCase(), ch => LOOKALIKE[ch] || ch).join('')
 
 // 一定時間あたりの回数制限
 function makeLimiter(max, windowMs) {
