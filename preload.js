@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   onFocus: (cb) => ipcRenderer.on('window:focused', () => cb()),
   onState: (cb) => ipcRenderer.on('window:state', (_, state) => cb(state)),
   notify: () => ipcRenderer.send('notify'),
+  setHostName: (name) => ipcRenderer.send('discovery:name', name),
   hosts: () => ipcRenderer.invoke('hosts:list'),
   onHosts: (cb) => ipcRenderer.on('hosts:update', (_, list) => cb(list)),
   qr: (url) => ipcRenderer.invoke('qr:make', url),

@@ -11,6 +11,7 @@ if (!window.api) {
     lanIp: async () => null,
     onFocus() {},
     onState() {},
+    setHostName() {},
     hosts: async () => [],
     onHosts() {},
     notify() {}

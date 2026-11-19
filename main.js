@@ -222,10 +222,24 @@ function pushNearby() {
   }
 }
 
+let published
+function advertise(nickname) {
+  const publish = () => {
+    published = bonjour.publish({ name: `LanTalk-${nickname}`, type: SERVICE_TYPE, port: PORT })
+  }
+  if (published) published.stop(publish)
+  else publish()
+}
+
+ipcMain.on('discovery:name', (e, name) => {
+  if (e.sender !== mainWindow.webContents || typeof name !== 'string' || !bonjour) return
+  const nickname = name.replace(/[\p{Cc}\p{Cf}]/gu, '').trim().slice(0, 16)
+  if (nickname) advertise(nickname)
+})
+
 function startDiscovery() {
   bonjour = new Bonjour()
-  // 自分もホストとして知らせる
-  bonjour.publish({ name: `LanTalk-${os.hostname()}`, type: SERVICE_TYPE, port: PORT })
+  // 自分を知らせるのは、ニックネームが決まってから(advertise)。Macのホスト名などは流さない
   const mine = myAddresses()
   const browser = bonjour.find({ type: SERVICE_TYPE })
   browser.on('up', (svc) => {

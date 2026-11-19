@@ -7,12 +7,20 @@ let connectGen = 0
 let nickname = localStorage.getItem('nickname') || ''
 let serverHost = localStorage.getItem('serverHost') || ''
 
-// この端末を見分ける値。HTTPのLANではcrypto.randomUUIDが使えないので、getRandomValuesで作る。
-// サーバーはこの値をそのまま配らず、別の値に変えて配る(他人のIDを名乗れないように)
-let clientId = localStorage.getItem('clientId')
-if (!clientId) {
-  clientId = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')
-  localStorage.setItem('clientId', clientId)
+// この端末を見分ける値。**接続先ごとに別の値**を持つ。
+// (参加先のサーバーには、この値が送られる。偽のホストに参加してしまっても、
+//  そこで知られた値を、本物のホストでの「なりすまし」に使えないようにするため)
+// HTTPのLANではcrypto.randomUUIDが使えないので、getRandomValuesで作る。
+// サーバーはこの値をそのまま配らず、別の値に変えて配る
+const currentHost = () => (WEB ? location.host : (serverHost || 'localhost'))
+function clientIdFor(host) {
+  const key = `clientId:${host}`
+  let id = localStorage.getItem(key)
+  if (!id) {
+    id = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')
+    localStorage.setItem(key, id)
+  }
+  return id
 }
 let myTag = '' // サーバーが入室時に教えてくれる、自分の発言者ID
 let currentRoomId = null
@@ -68,7 +76,7 @@ function handleMessage(msg) {
 
     case 'room:created':
       // 作成者はパスワード付きでもそのまま入室する
-      send({ type: 'room:join', roomId: msg.room.id, nickname, password: pendingCreatePassword, clientId })
+      send({ type: 'room:join', roomId: msg.room.id, nickname, password: pendingCreatePassword, clientId: clientIdFor(currentHost()) })
       pendingCreatePassword = ''
       break
 
@@ -140,6 +148,7 @@ function initApp() {
 }
 
 function enterRooms() {
+  window.api.setHostName(nickname)
   $('user-name-display').textContent = nickname
   paintAvatar($('profile-avatar'), nickname)
   showHost()
@@ -276,7 +285,7 @@ function doJoin(roomId, password) {
     currentRoomId = null
   }
   unreadCounts[roomId] = 0
-  send({ type: 'room:join', roomId, password, nickname, clientId })
+  send({ type: 'room:join', roomId, password, nickname, clientId: clientIdFor(currentHost()) })
 }
 
 // ---- Create room ----
