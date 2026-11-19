@@ -19,8 +19,14 @@ const EMPTY_ROOM_TTL = 30 * 60 * 1000 // 誰もいない部屋は30分で片付�
 const SECRET = crypto.randomBytes(16)
 const tagOf = (clientId) => crypto.createHmac('sha256', SECRET).update(clientId).digest('hex').slice(0, 12)
 
-// 制御文字と、表示の向きを入れ替える文字(RTL override など)は取り除く
-const clean = (s) => String(s).replace(/[\u0000-\u0008\u000B-\u001F\u007F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '')
+// 発言: 制御文字と、表示の向きを入れ替える文字(RTL override など)、行・段落の区切りを取り除く。
+// ゼロ幅接合子(絵文字の組み合わせに使われる)は残す
+const clean = (s) => String(s).replace(/[\u0000-\u0008\u000B-\u001F\u007F\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/g, '')
+
+// 名前: 見えない文字(ゼロ幅など)を含むフォーマット文字と制御文字をすべて取り除き、空白を詰める
+const cleanName = (s) => String(s).replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/\s+/g, ' ').trim()
+// 同じ名前かどうかの比較用。全角と半角、大文字と小文字などの違いを同じとみなす
+const nameKey = (s) => cleanName(s).normalize('NFKC').toLowerCase()
 
 // 一定時間あたりの回数制限
 function makeLimiter(max, windowMs) {
@@ -217,9 +223,9 @@ function startServer(port) {
     ws.on('error', () => {})
 
     ws.joinedRooms = new Set()
-    ws.nickname = 'Anonymous'
     ws.id = crypto.randomUUID()
-    ws.tag = tagOf(ws.id)
+    // 名前と識別子は「部屋ごと」に持つ。別の部屋に入るときの名前で、すでに入っている部屋の名前が変わらないように
+    ws.memberships = new Map() // roomId -> { nickname, tag }
 
     const reply = (obj) => ws.send(JSON.stringify(obj))
     const fail = (message) => reply({ type: 'room:error', message })
@@ -275,19 +281,19 @@ function startServer(port) {
             }
 
             // 発言者の識別。同じ端末が入り直したときは同じ値になる
-            if (typeof msg.clientId === 'string' && /^[\w-]{8,64}$/.test(msg.clientId)) {
-              ws.tag = tagOf(msg.clientId)
-            }
-            const wanted = typeof msg.nickname === 'string' && clean(msg.nickname).trim()
-              ? clean(msg.nickname).trim().slice(0, 16)
-              : ws.nickname
+            const tag = typeof msg.clientId === 'string' && /^[\w-]{8,64}$/.test(msg.clientId)
+              ? tagOf(msg.clientId)
+              : tagOf(ws.id)
+            const wanted = (typeof msg.nickname === 'string' && cleanName(msg.nickname).slice(0, 16).trim()) || 'Anonymous'
             const members = roomMembers.get(room.id)
-            // 同じ部屋で、別の人が同じ名前を名乗ってなりすますのを防ぐ
-            const taken = Array.from(members).some(m =>
-              m !== ws && m.tag !== ws.tag && m.nickname.toLowerCase() === wanted.toLowerCase())
+            // 同じ部屋で、別の人が同じ(に見える)名前を名乗ってなりすますのを防ぐ
+            const taken = Array.from(members).some(m => {
+              const other = m.memberships.get(room.id)
+              return m !== ws && other && other.tag !== tag && nameKey(other.nickname) === nameKey(wanted)
+            })
             if (taken) { fail('その名前はこの部屋で使われています。別の名前にしてください'); break }
 
-            ws.nickname = wanted
+            ws.memberships.set(room.id, { nickname: wanted, tag })
             members.add(ws)
             ws.joinedRooms.add(room.id)
             room.emptySince = null
@@ -296,7 +302,7 @@ function startServer(port) {
               room: { id: room.id, name: room.name },
               messages: (messages.get(room.id) || []).slice(-50),
               memberCount: members.size,
-              you: ws.tag
+              you: tag
             })
             scheduleRoomList()
             break
@@ -307,6 +313,7 @@ function startServer(port) {
             if (members) {
               members.delete(ws)
               ws.joinedRooms.delete(msg.roomId)
+              ws.memberships.delete(msg.roomId)
             }
             scheduleRoomList()
             break
@@ -318,12 +325,13 @@ function startServer(port) {
             const text = clean(msg.text).trim()
             if (!text) break
             const members = typeof roomId === 'string' ? roomMembers.get(roomId) : null
-            if (!members || !members.has(ws)) { fail('部屋に参加していません'); break }
+            const me = ws.memberships.get(roomId)
+            if (!members || !members.has(ws) || !me) { fail('部屋に参加していません'); break }
             const message = {
               id: crypto.randomUUID(),
               roomId,
-              user: ws.nickname,
-              userTag: ws.tag,
+              user: me.nickname,
+              userTag: me.tag,
               text: text.slice(0, 200),
               createdAt: Date.now()
             }
