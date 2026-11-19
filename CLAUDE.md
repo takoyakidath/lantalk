@@ -31,11 +31,21 @@ LAN内で使う小さなチャット。Electron + WebSocket(`server.js`、メモ
 - **新着通知:** 他の人のメッセージが来て、ウィンドウが「見えていてフォーカスもある」状態でないとき、画面の右上にLanTalkのアイコン+コーラルの点だけを10秒出す(`NOTIFY_MS`)(`notify.html/css/js`、別ウィンドウ、フォーカスを奪わない)。送信者名・件数・本文は出さない(後ろから見られても分からないように)。押すとメインウィンドウが開く。macOSではトレイに「•」も出る。ウィンドウにフォーカスすると消える
 - ブラウザ(PWA)では、薄くする挙動も通知も無し
 
+### LAN専用のまま作り直した点(2026-11-19)
+- 方針(ユーザー決定): クラウドの常設サーバーは**やらない**。LAN内で完結する設計を維持(クラウド版は将来、別製品として)
+- **近くのLanTalk(mDNS):** `main.js` の `startDiscovery`(`bonjour-service`、サービス種別 `_lantalk._tcp`)。自分自身は一覧から除外。設定画面に一覧が出て、選ぶと参加先IPが入る
+- **スマホで参加(QR):** 部屋一覧のIPチップ → QR+URLの画面(`qrcode`)。`index.html` のCSPに `img-src data:` を追加
+- **配布:** `.github/workflows/release.yml`(タグ `v*` のpushでmac/Win/Linuxをビルドし、Releasesに下書きで置く)。`package.json` の `build.publish` は github / draft。署名なし。**GitHubへのpush・公開はまだしていない**
+- **自己署名HTTPSは採用しない:** Chromeは証明書が信頼されていないとインストールもService Workerも許可しないため、狙い(インストールしやすさ)を満たさない。HTTPのまま、QRで開いて「ホーム画面に追加」
+- **依存の更新:** `ws` を 8.23.0 に更新(メモリ枯渇などの脆弱性)、未使用の `uuid` を削除。`npm audit --omit=dev` は0件
+- `npm audit fix` は固まることがあった(原因未調査)。`npm install <pkg>@<ver>` で個別に上げるとよい
+
 ## 次にやること
 
 - 実機のスマホで接続・ホーム画面追加を確認
 - `electron/`(旧コピー)は削除済み(2026-11-19、ユーザー了承)
-- 履歴の永続化、HTTPS化は希望があれば
+- 履歴の永続化は希望があれば
+- GitHubへのpush・タグ付け・Releasesの公開(外に出る操作なので、都度ユーザーに確認)
 
 ## 既知の注意点
 

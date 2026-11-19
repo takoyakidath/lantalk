@@ -1,6 +1,9 @@
 const { app, BrowserWindow, globalShortcut, screen, ipcMain, Tray, Menu, nativeImage, clipboard } = require('electron')
 const path = require('path')
 const os = require('os')
+const net = require('net')
+const QRCode = require('qrcode')
+const { Bonjour } = require('bonjour-service')
 const { startServer } = require('./server')
 
 const PORT = 7823
@@ -95,6 +98,7 @@ app.whenReady().then(() => {
   createNotifyWindow()
   createTray()
   watchCursor()
+  startDiscovery()
 
   globalShortcut.register('CommandOrControl+Shift+C', toggleWindow)
 })
@@ -196,6 +200,51 @@ ipcMain.on('window:open', (e) => {
   mainWindow.focus()
 })
 
+// ---- 同じLANのLanTalkを見つける(mDNS)。IPを手で打たなくて済むようにする ----
+const SERVICE_TYPE = 'lantalk'
+let bonjour
+let nearby = new Map() // key -> { name, host }
+
+function myAddresses() {
+  const set = new Set()
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const a of addrs || []) if (a.family === 'IPv4') set.add(a.address)
+  }
+  return set
+}
+
+function pushNearby() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('hosts:update', Array.from(nearby.values()))
+  }
+}
+
+function startDiscovery() {
+  bonjour = new Bonjour()
+  // 自分もホストとして知らせる
+  bonjour.publish({ name: `LanTalk-${os.hostname()}`, type: SERVICE_TYPE, port: PORT })
+  const mine = myAddresses()
+  const browser = bonjour.find({ type: SERVICE_TYPE })
+  browser.on('up', (svc) => {
+    const host = (svc.addresses || []).find(a => net.isIPv4(a))
+    if (!host || mine.has(host)) return // 自分自身は一覧に出さない
+    nearby.set(svc.fqdn || svc.name, { name: String(svc.name).replace(/^LanTalk-/, '').slice(0, 40), host })
+    pushNearby()
+  })
+  browser.on('down', (svc) => {
+    nearby.delete(svc.fqdn || svc.name)
+    pushNearby()
+  })
+}
+
+ipcMain.handle('hosts:list', () => Array.from(nearby.values()))
+
+// スマホで開くURLのQRコード
+ipcMain.handle('qr:make', (_, url) => {
+  if (typeof url !== 'string' || !/^http:\/\/[\d.]+:\d+$/.test(url)) return null
+  return QRCode.toDataURL(url, { margin: 1, width: 240, color: { dark: '#17262b', light: '#ffffff' } })
+})
+
 ipcMain.handle('clipboard:write', (_, text) => {
   if (typeof text !== 'string' || text.length > 200) return false
   clipboard.writeText(text)
@@ -219,6 +268,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  if (bonjour) bonjour.unpublishAll(() => bonjour.destroy())
   globalShortcut.unregisterAll()
 })
 

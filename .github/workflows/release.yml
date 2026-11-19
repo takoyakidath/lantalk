@@ -1,0 +1,29 @@
+# タグ(例: v1.0.0)をpushすると、mac / Windows / Linux のインストーラーを作って
+# GitHub Releases に下書きとして置く。公開するかどうかは、Releases の画面で人が決める。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 署名なしでビルドする(署名したい場合はここに証明書を設定する)
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'

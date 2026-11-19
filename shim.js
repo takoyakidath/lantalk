@@ -11,6 +11,8 @@ if (!window.api) {
     lanIp: async () => null,
     onFocus() {},
     onState() {},
+    hosts: async () => [],
+    onHosts() {},
     notify() {}
   }
   document.documentElement.classList.add('web')

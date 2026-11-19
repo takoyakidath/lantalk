@@ -325,6 +325,27 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--hover); }
 
 @keyframes rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* ---- 近くのLanTalk / スマホで参加 ---- */
+.nearby-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.nearby-item {
+  width: 100%;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px;
+  border: none; background: none;
+  border-radius: 10px;
+  text-align: left;
+}
+.nearby-item:hover { background: var(--hover); }
+.nearby-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.nearby-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nearby-ip { font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+
+.share { align-items: center; text-align: center; }
+.share .lead { font-size: 12px; }
+.qr { background: #fff; padding: 8px; border-radius: 12px; }
+.share-url { font-size: 12px; color: var(--ink-soft); user-select: text; }
+.share .actions { align-self: stretch; }
+
 /* ---- Toast ---- */
 .toast {
   position: absolute; left: 12px; right: 12px; top: 52px; z-index: 100;

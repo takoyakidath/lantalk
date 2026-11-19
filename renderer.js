@@ -87,7 +87,7 @@ function handleMessage(msg) {
 }
 
 // ---- Views ----
-const VIEW_SIZES = { setup: [320, 380], rooms: [320, 440], chat: [320, 500], mini: [320, 88] }
+const VIEW_SIZES = { setup: [320, 440], rooms: [320, 480], chat: [320, 500], mini: [320, 88] }
 
 function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'))
@@ -142,18 +142,51 @@ async function showHost() {
   $('host-display').textContent = ip || ''
 }
 
-// 押すと、他の端末のブラウザで開くURLをコピーする
+// 押すと、スマホで開くURLのQRコードを出す
+let shareUrl = ''
 $('host-display').addEventListener('click', async () => {
   const ip = $('host-display').textContent
   if (!ip) return
-  const url = `http://${ip}:${PORT}`
+  shareUrl = `http://${ip}:${PORT}`
+  $('share-url').textContent = shareUrl
+  $('qr-img').src = (await window.api.qr(shareUrl)) || ''
+  openModal('modal-share')
+})
+$('btn-close-share').addEventListener('click', () => closeModal('modal-share'))
+$('btn-copy-url').addEventListener('click', async () => {
   try {
-    await window.api.copy(url)
-    showToast(`${url} をコピーしました`)
+    await window.api.copy(shareUrl)
+    showToast('URLをコピーしました')
   } catch {
     showToast('コピーできませんでした')
   }
 })
+
+// 同じLANのLanTalkを一覧に出して、選ぶだけで参加先を入力できるようにする
+function renderNearby(list) {
+  const items = (Array.isArray(list) ? list : []).filter(h => h && /^[\d.]+$/.test(String(h.host)))
+  const ul = $('nearby-list')
+  ul.replaceChildren()
+  $('nearby').classList.toggle('hidden', items.length === 0)
+  items.forEach(h => {
+    const li = el('li')
+    const btn = el('button', 'nearby-item')
+    btn.type = 'button'
+    btn.append(avatarEl(String(h.name || '?')))
+    const text = el('span', 'nearby-text')
+    text.append(el('span', 'nearby-name', String(h.name || h.host)))
+    text.append(el('span', 'nearby-ip', String(h.host)))
+    btn.append(text)
+    btn.addEventListener('click', () => {
+      $('input-host').value = h.host
+      $('input-host').focus()
+    })
+    li.append(btn)
+    ul.append(li)
+  })
+}
+window.api.hosts().then(renderNearby)
+window.api.onHosts(renderNearby)
 
 $('btn-profile').addEventListener('click', () => {
   $('input-nickname').value = nickname
@@ -279,11 +312,12 @@ function closePasswordModal() {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return
-  if ($('modal-create-room').classList.contains('hidden') && $('modal-password').classList.contains('hidden')) {
+  if ($('modal-create-room').classList.contains('hidden') && $('modal-password').classList.contains('hidden') && $('modal-share').classList.contains('hidden')) {
     window.api.hide()
     return
   }
-  if (!$('modal-create-room').classList.contains('hidden')) closeCreateModal()
+  if (!$('modal-share').classList.contains('hidden')) closeModal('modal-share')
+  else if (!$('modal-create-room').classList.contains('hidden')) closeCreateModal()
   else if (!$('modal-password').classList.contains('hidden')) closePasswordModal()
 })
 
