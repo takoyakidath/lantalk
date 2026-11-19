@@ -9,7 +9,7 @@ let notifyWindow
 let tray
 let unseen = 0 // 見ていない新着の数(通知はあるかないかだけ見せる)
 let notifyTimer
-const NOTIFY_MS = 5000
+const NOTIFY_MS = 10000
 
 function createTray() {
   // 16x16 simple colored dot as tray icon
