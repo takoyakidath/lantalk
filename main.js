@@ -204,7 +204,7 @@ ipcMain.on('window:open', (e) => {
 const SERVICE_TYPE = 'lantalk'
 let bonjour
 const MAX_NEARBY = 20
-let nearby = new Map() // `${名前}|${IP}` -> { name, host }
+let nearby = new Map() // IP -> { name, host, fqdn }(挿入順 = 古い順)
 
 function myAddresses() {
   const set = new Set()
@@ -216,7 +216,7 @@ function myAddresses() {
 
 function pushNearby() {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('hosts:update', Array.from(nearby.values()))
+    mainWindow.webContents.send('hosts:update', Array.from(nearby.values(), ({ name, host }) => ({ name, host })))
   }
 }
 
@@ -230,21 +230,22 @@ function startDiscovery() {
     // 広告は誰でも出せる。LAN内のIPだけを信用し、自分自身は一覧に出さない
     const host = (svc.addresses || []).find(a => net.isIPv4(a) && isPrivateIP(a))
     if (!host || mine.has(host)) return
-    // 名前+IPで管理する。後から同じ名前を名乗られても、既存の項目のIPは書き換わらない
-    const key = `${svc.fqdn || svc.name}|${host}`
-    if (!nearby.has(key) && nearby.size >= MAX_NEARBY) return
-    nearby.set(key, { name: String(svc.name).replace(/^LanTalk-/, '').slice(0, 40), host })
+    // IPごとに1項目。すでにある項目の名前は、あとから来た広告で書き換えない。
+    // 満杯のときは新しい広告を断らず、いちばん古い項目を追い出す(偽の広告で本物が出なくなるのを防ぐ)
+    if (nearby.has(host)) return
+    if (nearby.size >= MAX_NEARBY) nearby.delete(nearby.keys().next().value)
+    nearby.set(host, { name: String(svc.name).replace(/^LanTalk-/, '').slice(0, 40), host, fqdn: svc.fqdn || svc.name })
     pushNearby()
   })
   browser.on('down', (svc) => {
-    for (const key of Array.from(nearby.keys())) {
-      if (key.startsWith(`${svc.fqdn || svc.name}|`)) nearby.delete(key)
+    for (const [ip, entry] of Array.from(nearby)) {
+      if (entry.fqdn === (svc.fqdn || svc.name)) nearby.delete(ip)
     }
     pushNearby()
   })
 }
 
-ipcMain.handle('hosts:list', () => Array.from(nearby.values()))
+ipcMain.handle('hosts:list', () => Array.from(nearby.values(), ({ name, host }) => ({ name, host })))
 
 // スマホで開くURLのQRコード
 ipcMain.handle('qr:make', (_, url) => {
