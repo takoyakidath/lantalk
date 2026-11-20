@@ -10,6 +10,7 @@ const SALT_ROUNDS = 10
 
 // 1台のLAN端末が、ホストのメモリやCPUを使い切れないようにする上限
 const MAX_ROOMS = 50
+const EVICT_GRACE = 5 * 60 * 1000 // 満杯のときに追い出せるのは、作って5分たった未使用の部屋だけ(作った直後の部屋は、これから入室するところ)
 const MAX_ROOMS_PER_IP = 10 // 1台が持てる部屋の数。発言のある部屋は7日残るので、枠を独占させない
 const MAX_CONN_PER_IP = 20
 const MAX_CONN_TOTAL = 200
@@ -243,6 +244,7 @@ function startServer(port, opts = {}) {
   const sweepMs = opts.sweepMs ?? 60_000
   const maxRooms = opts.maxRooms ?? MAX_ROOMS
   const maxRoomsPerIp = opts.maxRoomsPerIp ?? MAX_ROOMS_PER_IP
+  const evictGrace = opts.evictGraceMs ?? EVICT_GRACE
   rooms.clear(); messages.clear(); roomMembers.clear()
   dataFile = opts.dataFile || null
   if (dataFile) loadData(dataFile)
@@ -262,6 +264,26 @@ function startServer(port, opts = {}) {
   const joinTries = makeLimiter(5, 60_000)     // パスワード付きの部屋への入室の試行: 1分に5回まで
   const createRate = makeLimiter(opts.createPerMinute ?? 10, 60_000) // 部屋の作成: 1分に10回まで
   const msgRate = makeLimiter(40, 10_000)      // 1接続あたりのメッセージ: 10秒に40通まで
+
+  // 部屋を作ってよいかを調べる。だめなら理由(文字列)を返し、よければ null を返す。
+  // evict が true のときは、満杯なら「誰もおらず発言も一度もない、作って一定時間たった、いちばん古い部屋」を
+  // 片付けて枠を空ける。発言のある部屋(履歴)と、作ったばかりの部屋は追い出さない
+  const claimSlot = (ip, evict) => {
+    const mine = Array.from(rooms.values()).filter(r => r.creatorIp === ip).length
+    if (mine >= maxRoomsPerIp) return `この端末でつくれる部屋は${maxRoomsPerIp}個までです`
+    if (rooms.size >= maxRooms) {
+      const now = Date.now()
+      let stale = null
+      for (const r of rooms.values()) {
+        const empty = !(roomMembers.get(r.id) || { size: 0 }).size
+        const unused = !(messages.get(r.id) || []).length
+        if (empty && unused && now - r.lastActiveAt > evictGrace && (!stale || r.lastActiveAt < stale.lastActiveAt)) stale = r
+      }
+      if (!stale) return '部屋が多すぎます。使われていない部屋が片付くまでお待ちください'
+      if (evict) { rooms.delete(stale.id); messages.delete(stale.id); roomMembers.delete(stale.id) }
+    }
+    return null
+  }
 
   // 部屋一覧は、短い間に何度変わってもまとめて1回だけ配る
   let listTimer = null
@@ -352,26 +374,18 @@ function startServer(port, opts = {}) {
             const name = clean(msg.name || '').trim().slice(0, 20)
             if (!name) { fail('部屋名を入力してください'); break }
             if (!createRate.hit(ip)) { fail('部屋をつくる回数が多すぎます。しばらくしてからやり直してください'); break }
-            // 1台が持てる部屋の数に上限(発言のある部屋は7日残るので、1台で枠を埋められないようにする)
-            const mine = Array.from(rooms.values()).filter(r => r.creatorIp === ip).length
-            if (mine >= maxRoomsPerIp) { fail(`この端末でつくれる部屋は${maxRoomsPerIp}個までです`); break }
-            // 満杯のときは、断る前に「誰もおらず、発言も一度もない、いちばん古い部屋」を片付ける。
-            // 発言のある部屋(履歴)は、追い出さない
-            if (rooms.size >= maxRooms) {
-              let stale = null
-              for (const r of rooms.values()) {
-                const empty = !(roomMembers.get(r.id) || { size: 0 }).size
-                const unused = !(messages.get(r.id) || []).length
-                if (empty && unused && (!stale || r.lastActiveAt < stale.lastActiveAt)) stale = r
-              }
-              if (!stale) { fail('部屋が多すぎます。使われていない部屋が片付くまでお待ちください'); break }
-              rooms.delete(stale.id); messages.delete(stale.id); roomMembers.delete(stale.id)
-            }
+            // 時間のかかるハッシュ計算の前に、無理な要求は早めに断る
+            const early = claimSlot(ip, false)
+            if (early) { fail(early); break }
             const id = crypto.randomUUID()
             let passwordHash = null
             if (typeof msg.password === 'string' && msg.password.trim()) {
               passwordHash = await bcrypt.hash(msg.password.slice(0, 32), SALT_ROUNDS)
             }
+            // ハッシュ計算の間に、一斉に送られた他の要求が枠を使っていることがある。
+            // そのため、確認と登録の間に await を挟まずに、ここでもう一度確認する
+            const denied = claimSlot(ip, true)
+            if (denied) { fail(denied); break }
             rooms.set(id, { id, name, passwordHash, createdAt: Date.now(), lastActiveAt: Date.now(), creatorIp: ip })
             persist()
             messages.set(id, [])
