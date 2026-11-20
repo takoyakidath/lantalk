@@ -10,6 +10,7 @@ const SALT_ROUNDS = 10
 
 // 1台のLAN端末が、ホストのメモリやCPUを使い切れないようにする上限
 const MAX_ROOMS = 50
+const MAX_ROOMS_PER_IP = 10 // 1台が持てる部屋の数。発言のある部屋は7日残るので、枠を独占させない
 const MAX_CONN_PER_IP = 20
 const MAX_CONN_TOTAL = 200
 const UNUSED_ROOM_TTL = 30 * 60 * 1000          // 発言が一度もなく、誰もいない部屋は30分で片付ける
@@ -51,7 +52,7 @@ function snapshot() {
     version: 1,
     secret: SECRET.toString('hex'),
     rooms: Array.from(rooms.values()).map(r => ({
-      id: r.id, name: r.name, passwordHash: r.passwordHash, createdAt: r.createdAt, lastActiveAt: r.lastActiveAt,
+      id: r.id, name: r.name, passwordHash: r.passwordHash, createdAt: r.createdAt, lastActiveAt: r.lastActiveAt, creatorIp: r.creatorIp,
       messages: messages.get(r.id) || []
     }))
   }
@@ -102,7 +103,8 @@ function loadData(file) {
       }))
     rooms.set(r.id, {
       id: r.id, name: r.name.slice(0, 20), passwordHash: hash,
-      createdAt: Number(r.createdAt) || Date.now(), lastActiveAt: Number(r.lastActiveAt) || Date.now()
+      createdAt: Number(r.createdAt) || Date.now(), lastActiveAt: Number(r.lastActiveAt) || Date.now(),
+      creatorIp: typeof r.creatorIp === 'string' ? r.creatorIp.slice(0, 45) : undefined
     })
     messages.set(r.id, list)
     roomMembers.set(r.id, new Set())
@@ -135,7 +137,7 @@ function makeLimiter(max, windowMs) {
 const rooms = new Map()       // roomId -> { id, name, passwordHash, createdAt }
 const messages = new Map()    // roomId -> [message]
 const roomMembers = new Map() // roomId -> Set of ws connections
-// room: { id, name, passwordHash, createdAt, lastActiveAt }
+// room: { id, name, passwordHash, createdAt, lastActiveAt, creatorIp }
 
 function isPrivateIP(ip) {
   ip = (ip || '').replace(/^::ffff:/, '')
@@ -239,6 +241,8 @@ function startServer(port, opts = {}) {
   const unusedTtl = opts.unusedRoomTtlMs ?? UNUSED_ROOM_TTL
   const idleTtl = opts.idleRoomTtlMs ?? IDLE_ROOM_TTL
   const sweepMs = opts.sweepMs ?? 60_000
+  const maxRooms = opts.maxRooms ?? MAX_ROOMS
+  const maxRoomsPerIp = opts.maxRoomsPerIp ?? MAX_ROOMS_PER_IP
   rooms.clear(); messages.clear(); roomMembers.clear()
   dataFile = opts.dataFile || null
   if (dataFile) loadData(dataFile)
@@ -256,7 +260,7 @@ function startServer(port, opts = {}) {
 
   const ipConns = new Map()                    // ip -> 接続数
   const joinTries = makeLimiter(5, 60_000)     // パスワード付きの部屋への入室の試行: 1分に5回まで
-  const createRate = makeLimiter(10, 60_000)   // 部屋の作成: 1分に10回まで
+  const createRate = makeLimiter(opts.createPerMinute ?? 10, 60_000) // 部屋の作成: 1分に10回まで
   const msgRate = makeLimiter(40, 10_000)      // 1接続あたりのメッセージ: 10秒に40通まで
 
   // 部屋一覧は、短い間に何度変わってもまとめて1回だけ配る
@@ -348,13 +352,27 @@ function startServer(port, opts = {}) {
             const name = clean(msg.name || '').trim().slice(0, 20)
             if (!name) { fail('部屋名を入力してください'); break }
             if (!createRate.hit(ip)) { fail('部屋をつくる回数が多すぎます。しばらくしてからやり直してください'); break }
-            if (rooms.size >= MAX_ROOMS) { fail('部屋が多すぎます。使われていない部屋が片付くまでお待ちください'); break }
+            // 1台が持てる部屋の数に上限(発言のある部屋は7日残るので、1台で枠を埋められないようにする)
+            const mine = Array.from(rooms.values()).filter(r => r.creatorIp === ip).length
+            if (mine >= maxRoomsPerIp) { fail(`この端末でつくれる部屋は${maxRoomsPerIp}個までです`); break }
+            // 満杯のときは、断る前に「誰もおらず、発言も一度もない、いちばん古い部屋」を片付ける。
+            // 発言のある部屋(履歴)は、追い出さない
+            if (rooms.size >= maxRooms) {
+              let stale = null
+              for (const r of rooms.values()) {
+                const empty = !(roomMembers.get(r.id) || { size: 0 }).size
+                const unused = !(messages.get(r.id) || []).length
+                if (empty && unused && (!stale || r.lastActiveAt < stale.lastActiveAt)) stale = r
+              }
+              if (!stale) { fail('部屋が多すぎます。使われていない部屋が片付くまでお待ちください'); break }
+              rooms.delete(stale.id); messages.delete(stale.id); roomMembers.delete(stale.id)
+            }
             const id = crypto.randomUUID()
             let passwordHash = null
             if (typeof msg.password === 'string' && msg.password.trim()) {
               passwordHash = await bcrypt.hash(msg.password.slice(0, 32), SALT_ROUNDS)
             }
-            rooms.set(id, { id, name, passwordHash, createdAt: Date.now(), lastActiveAt: Date.now() })
+            rooms.set(id, { id, name, passwordHash, createdAt: Date.now(), lastActiveAt: Date.now(), creatorIp: ip })
             persist()
             messages.set(id, [])
             roomMembers.set(id, new Set())
