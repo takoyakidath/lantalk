@@ -1,6 +1,6 @@
 {
   "name": "lantalk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "LAN内で使う小さなチャット(Electron + PWA)",
   "main": "main.js",
   "scripts": {
