@@ -64,6 +64,15 @@ LAN内で使う小さなチャット。Electron + WebSocket(`server.js`、メモ
 - リポジトリは非公開(PRIVATE)。署名なし(初回起動で警告)。Windows/Linuxの実機動作は未確認
 - 次のリリース: `package.json` の `version` を上げて、`git tag -a vX.Y.Z` → `git push origin vX.Y.Z`(下書きで作られるので、`gh release edit vX.Y.Z --draft=false` で公開)
 
+### 履歴の保存・検証用の分離・macの署名(2026-11-20)
+- **履歴の保存(`server.js`):** `startServer(port, { dataFile })`。部屋・パスワードのハッシュ・直近200件の発言・HMACの鍵(`SECRET`)を、`userData/lantalk-data.json` に保存(権限0600、書き込みは一時ファイル→rename、変更は500msにまとめる、終了時に `flush`)。読み込み時に中身を検査し、**パスワードのハッシュが壊れた部屋は読み込まない**(読むと、パスワードなしで入れる部屋になるため)。鍵も保存するので、再起動しても発言者の識別子が変わらない
+- **片付けの時間:** 発言のない部屋は30分(`UNUSED_ROOM_TTL`)、発言のある部屋は7日間使われなければ(`IDLE_ROOM_TTL`)。在室中の部屋は消さない。検証用に `opts.unusedRoomTtlMs / idleRoomTtlMs / sweepMs` で縮められる
+- **トレイの「履歴をすべて消す…」:** 確認ダイアログのあと `server.clearAll()`(ファイルの中身も空にする)
+- **自動の入り直し(`renderer.js`):** 切断→再接続したとき、`lastJoin`(部屋ID・パスワード。メモリ上のみ)で同じ部屋に入り直す。失敗したら部屋一覧に戻す
+- **検証用の分離:** `LANTALK_PORT`(既定7823)と `LANTALK_USER_DATA`(保存先)。レンダラーのポートは `additionalArguments` の `--lantalk-port=` で渡す。**検証は必ずこれで分けること**(以前は検証が、使っているアプリのポートと保存先に触れていた)
+- **macのarm64版が「壊れている」と出た件(v1.0.0):** 署名なしでビルドしたため、Electron本体に付いていた署名とアプリの中身が食い違って無効になっていた(`codesign --verify` が `code has no resources but signature indicates they must be present`)。`build/adhoc-sign.js`(`afterPack`)で、アプリ全体にad-hoc署名を付け直すようにした。Apple Developer IDでの署名・公証ではないので、初回起動の警告は残る
+- 検証でアプリを止めるとき、`pkill -f lantalk/node_modules/electron` は開発用のフォルダのアプリだけに効く。ダウンロードして入れたアプリ(`AppTranslocation` 等)は対象外
+
 ## 次にやること
 
 - 実機のスマホで接続・ホーム画面追加を確認

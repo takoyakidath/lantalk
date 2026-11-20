@@ -22,6 +22,8 @@ function clientIdFor(host) {
   }
   return id
 }
+let lastJoin = null   // 直近に入った部屋(再接続したとき、自動で入り直すため。パスワードはメモリ上だけ)
+let rejoining = false
 let myTag = '' // サーバーが入室時に教えてくれる、自分の発言者ID
 let currentRoomId = null
 let pendingJoinRoomId = null
@@ -41,7 +43,14 @@ function connect() {
   ws = new WebSocket(`${window.api.secure ? 'wss' : 'ws'}://${host}:${PORT}`)
   const sock = ws
 
-  sock.onopen = () => setOnline(true)
+  sock.onopen = () => {
+    setOnline(true)
+    // ホストが再起動した・つなぎ直したときは、サーバー側の入室が消えているので、入り直す
+    if (currentRoomId && lastJoin && lastJoin.roomId === currentRoomId) {
+      rejoining = true
+      send({ type: 'room:join', roomId: lastJoin.roomId, password: lastJoin.password, nickname, clientId: clientIdFor(currentHost()) })
+    }
+  }
 
   sock.onmessage = (e) => {
     try { handleMessage(JSON.parse(e.data)) } catch (err) { console.error(err) }
@@ -76,11 +85,13 @@ function handleMessage(msg) {
 
     case 'room:created':
       // 作成者はパスワード付きでもそのまま入室する
+      lastJoin = { roomId: msg.room.id, password: pendingCreatePassword }
       send({ type: 'room:join', roomId: msg.room.id, nickname, password: pendingCreatePassword, clientId: clientIdFor(currentHost()) })
       pendingCreatePassword = ''
       break
 
     case 'room:joined':
+      rejoining = false
       currentRoomId = msg.room.id
       myTag = String(msg.you || '')
       unreadCounts[msg.room.id] = 0
@@ -89,6 +100,12 @@ function handleMessage(msg) {
       break
 
     case 'room:error':
+      if (rejoining) { // 入り直せなかった(部屋が片付けられた・パスワードが変わった等)
+        rejoining = false
+        currentRoomId = null
+        lastJoin = null
+        showView('rooms')
+      }
       showToast(msg.message)
       break
 
@@ -285,6 +302,7 @@ function doJoin(roomId, password) {
     currentRoomId = null
   }
   unreadCounts[roomId] = 0
+  lastJoin = { roomId, password }
   send({ type: 'room:join', roomId, password, nickname, clientId: clientIdFor(currentHost()) })
 }
 

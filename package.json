@@ -39,7 +39,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "identity": null
     },
     "win": {
       "target": [
@@ -68,7 +69,8 @@
     "publish": {
       "provider": "github",
       "releaseType": "draft"
-    }
+    },
+    "afterPack": "build/adhoc-sign.js"
   },
   "repository": {
     "type": "git",

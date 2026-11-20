@@ -13,5 +13,5 @@ contextBridge.exposeInMainWorld('api', {
   onHosts: (cb) => ipcRenderer.on('hosts:update', (_, list) => cb(list)),
   qr: (url) => ipcRenderer.invoke('qr:make', url),
   openMain: () => ipcRenderer.send('window:open'),
-  port: 7823
+  port: Number((process.argv.find(a => a.startsWith('--lantalk-port=')) || '').split('=')[1]) || 7823
 })

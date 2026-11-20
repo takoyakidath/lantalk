@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, screen, ipcMain, Tray, Menu, nativeImage, clipboard } = require('electron')
+const { app, BrowserWindow, globalShortcut, screen, ipcMain, Tray, Menu, nativeImage, clipboard, dialog } = require('electron')
 const path = require('path')
 const os = require('os')
 const net = require('net')
@@ -6,7 +6,10 @@ const QRCode = require('qrcode')
 const { Bonjour } = require('bonjour-service')
 const { startServer, isPrivateIP } = require('./server')
 
-const PORT = 7823
+// 検証用: 使っているアプリを止めずに試せるよう、ポートと保存先を環境変数で変えられる
+const PORT = Number(process.env.LANTALK_PORT) || 7823
+if (process.env.LANTALK_USER_DATA) app.setPath('userData', process.env.LANTALK_USER_DATA)
+let server
 let mainWindow
 let notifyWindow
 let tray
@@ -35,11 +38,25 @@ function createTray() {
   tray.setToolTip('LanTalk')
   const menu = Menu.buildFromTemplate([
     { label: '表示/非表示', click: toggleWindow },
+    { label: '履歴をすべて消す…', click: confirmClear },
     { type: 'separator' },
     { label: '終了', click: () => { app.isQuitting = true; app.quit() } }
   ])
   tray.setContextMenu(menu)
   tray.on('click', toggleWindow)
+}
+
+// 部屋と履歴は、この端末のファイルにも保存されている。確認してから、まとめて消す
+async function confirmClear() {
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['消す', 'キャンセル'],
+    defaultId: 1,
+    cancelId: 1,
+    message: 'すべての部屋と履歴を消しますか?',
+    detail: 'この端末に保存されている分も消えます。元には戻せません。'
+  })
+  if (response === 0 && server) server.clearAll()
 }
 
 function toggleWindow() {
@@ -71,7 +88,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      additionalArguments: [`--lantalk-port=${PORT}`]
     }
   })
 
@@ -93,7 +111,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  startServer(PORT)
+  server = startServer(PORT, { dataFile: path.join(app.getPath('userData'), 'lantalk-data.json') })
   createWindow()
   createNotifyWindow()
   createTray()
@@ -296,6 +314,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  if (server) server.flush() // 保存し残しがないように
   if (bonjour) bonjour.unpublishAll(() => bonjour.destroy())
   globalShortcut.unregisterAll()
 })

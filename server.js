@@ -12,11 +12,12 @@ const SALT_ROUNDS = 10
 const MAX_ROOMS = 50
 const MAX_CONN_PER_IP = 20
 const MAX_CONN_TOTAL = 200
-const EMPTY_ROOM_TTL = 30 * 60 * 1000 // 誰もいない部屋は30分で片付ける
+const UNUSED_ROOM_TTL = 30 * 60 * 1000          // 発言が一度もなく、誰もいない部屋は30分で片付ける
+const IDLE_ROOM_TTL = 7 * 24 * 60 * 60 * 1000   // 発言のある部屋は、7日間だれも使わなければ片付ける
 
 // 発言者の識別用。クライアントが送るclientIdは、そのままは配らず、サーバーだけが知る鍵で別の値にして配る
 // (配られた値からclientIdは分からないので、他人のclientIdを名乗れない)
-const SECRET = crypto.randomBytes(16)
+let SECRET = crypto.randomBytes(16) // 保存した履歴があれば、再起動しても同じ値を使う(発言者の識別子を保つため)
 const tagOf = (clientId) => crypto.createHmac('sha256', SECRET).update(clientId).digest('hex').slice(0, 12)
 
 // 発言: 制御文字と、表示の向きを入れ替える文字(RTL override など)、行・段落の区切りを取り除く。
@@ -39,6 +40,74 @@ const LOOKALIKE = {
 // 同じ名前かどうかの比較用。全角と半角、大文字と小文字、見た目が同じ文字の違いを、同じとみなす。
 // (濁点など、日本語の区別は保つ。分解して記号を消すことはしない)
 const nameKey = (s) => Array.from(cleanName(s).normalize('NFKC').toLowerCase(), ch => LOOKALIKE[ch] || ch).join('')
+
+// ---- 履歴の保存(ホストの端末のファイルに保存。本人だけが読めるファイル権限にする) ----
+const UUID_RE = /^[0-9a-f-]{36}$/i
+let dataFile = null
+let saveTimer = null
+
+function snapshot() {
+  return {
+    version: 1,
+    secret: SECRET.toString('hex'),
+    rooms: Array.from(rooms.values()).map(r => ({
+      id: r.id, name: r.name, passwordHash: r.passwordHash, createdAt: r.createdAt, lastActiveAt: r.lastActiveAt,
+      messages: messages.get(r.id) || []
+    }))
+  }
+}
+
+function writeNow() {
+  if (!dataFile) return
+  clearTimeout(saveTimer)
+  saveTimer = null
+  try {
+    const tmp = dataFile + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify(snapshot()), { mode: 0o600 })
+    fs.renameSync(tmp, dataFile) // 書き込み途中で止まっても、元のファイルを壊さない
+  } catch (err) {
+    console.error('[server] 履歴を保存できませんでした:', err.message)
+  }
+}
+
+// 短い間に何度変わっても、まとめて1回だけ書く
+function persist() {
+  if (!dataFile || saveTimer) return
+  saveTimer = setTimeout(writeNow, 500)
+  saveTimer.unref()
+}
+
+// 保存したファイルは、念のため中身を検査してから読み込む(壊れていても、起動できるように)
+function loadData(file) {
+  let raw
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return }
+  if (!raw || raw.version !== 1 || !Array.isArray(raw.rooms)) return
+  if (typeof raw.secret === 'string' && /^[0-9a-f]{32}$/.test(raw.secret)) SECRET = Buffer.from(raw.secret, 'hex')
+  for (const r of raw.rooms.slice(0, MAX_ROOMS)) {
+    if (!r || typeof r.id !== 'string' || !UUID_RE.test(r.id) || typeof r.name !== 'string') continue
+    // パスワード付きの部屋のハッシュが壊れていたら、その部屋は読み込まない
+    // (読み込むと、パスワードなしで入れる部屋になってしまう)
+    const hasHash = r.passwordHash !== null && r.passwordHash !== undefined
+    const hash = typeof r.passwordHash === 'string' && /^\$2[aby]\$/.test(r.passwordHash) && r.passwordHash.length <= 100 ? r.passwordHash : null
+    if (hasHash && !hash) continue
+    const list = (Array.isArray(r.messages) ? r.messages : []).slice(-200)
+      .filter(m => m && typeof m.text === 'string' && typeof m.user === 'string')
+      .map(m => ({
+        id: String(m.id || crypto.randomUUID()).slice(0, 40),
+        roomId: r.id,
+        user: m.user.slice(0, 16),
+        userTag: String(m.userTag || '').slice(0, 12),
+        text: m.text.slice(0, 200),
+        createdAt: Number(m.createdAt) || Date.now()
+      }))
+    rooms.set(r.id, {
+      id: r.id, name: r.name.slice(0, 20), passwordHash: hash,
+      createdAt: Number(r.createdAt) || Date.now(), lastActiveAt: Number(r.lastActiveAt) || Date.now()
+    })
+    messages.set(r.id, list)
+    roomMembers.set(r.id, new Set())
+  }
+}
 
 // 一定時間あたりの回数制限
 function makeLimiter(max, windowMs) {
@@ -66,7 +135,7 @@ function makeLimiter(max, windowMs) {
 const rooms = new Map()       // roomId -> { id, name, passwordHash, createdAt }
 const messages = new Map()    // roomId -> [message]
 const roomMembers = new Map() // roomId -> Set of ws connections
-// room: { id, name, passwordHash, createdAt, emptySince }
+// room: { id, name, passwordHash, createdAt, lastActiveAt }
 
 function isPrivateIP(ip) {
   ip = (ip || '').replace(/^::ffff:/, '')
@@ -165,7 +234,15 @@ function broadcastRoomList(wss) {
   })
 }
 
-function startServer(port) {
+function startServer(port, opts = {}) {
+  // opts: dataFile(履歴の保存先) / unusedRoomTtlMs / idleRoomTtlMs / sweepMs(検証用に時間を縮める)
+  const unusedTtl = opts.unusedRoomTtlMs ?? UNUSED_ROOM_TTL
+  const idleTtl = opts.idleRoomTtlMs ?? IDLE_ROOM_TTL
+  const sweepMs = opts.sweepMs ?? 60_000
+  rooms.clear(); messages.clear(); roomMembers.clear()
+  dataFile = opts.dataFile || null
+  if (dataFile) loadData(dataFile)
+
   // 同じポートでHTTP(PWAの配信)とWebSocketの両方を受ける
   const httpServer = http.createServer(handleHttp)
   const wss = new WebSocket.Server({
@@ -190,21 +267,22 @@ function startServer(port) {
   }
 
   // 誰もいない部屋を片付け、使い終わった回数の記録を捨てる
+  // (一度も発言がなかった部屋は早く、発言のある部屋は履歴を残すため長く置く)
   const sweep = setInterval(() => {
     const now = Date.now()
     let removed = false
     for (const room of Array.from(rooms.values())) {
       const members = roomMembers.get(room.id)
-      if (members && members.size > 0) { room.emptySince = null; continue }
-      room.emptySince = room.emptySince || now
-      if (now - room.emptySince > EMPTY_ROOM_TTL) {
+      if (members && members.size > 0) continue
+      const used = (messages.get(room.id) || []).length > 0
+      if (now - room.lastActiveAt > (used ? idleTtl : unusedTtl)) {
         rooms.delete(room.id); messages.delete(room.id); roomMembers.delete(room.id)
         removed = true
       }
     }
     joinTries.prune(); createRate.prune(); msgRate.prune()
-    if (removed) scheduleRoomList()
-  }, 60_000)
+    if (removed) { scheduleRoomList(); persist() }
+  }, sweepMs)
 
   // 切れたまま残った接続(ゴースト)を片付ける
   const heartbeat = setInterval(() => {
@@ -215,7 +293,13 @@ function startServer(port) {
     })
   }, 30_000)
   sweep.unref(); heartbeat.unref()
-  wss.on('close', () => { clearInterval(sweep); clearInterval(heartbeat); clearTimeout(listTimer) })
+  wss.on('close', () => { clearInterval(sweep); clearInterval(heartbeat); clearTimeout(listTimer); writeNow() })
+  wss.flush = writeNow // 終了前に、保存し残しがないようにする
+  wss.clearAll = () => { // すべての部屋と履歴を消す(保存したファイルの中身も)
+    rooms.clear(); messages.clear(); roomMembers.clear()
+    scheduleRoomList()
+    writeNow()
+  }
 
   wss.on('connection', (ws, req) => {
     const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
@@ -270,7 +354,8 @@ function startServer(port) {
             if (typeof msg.password === 'string' && msg.password.trim()) {
               passwordHash = await bcrypt.hash(msg.password.slice(0, 32), SALT_ROUNDS)
             }
-            rooms.set(id, { id, name, passwordHash, createdAt: Date.now(), emptySince: Date.now() })
+            rooms.set(id, { id, name, passwordHash, createdAt: Date.now(), lastActiveAt: Date.now() })
+            persist()
             messages.set(id, [])
             roomMembers.set(id, new Set())
             scheduleRoomList()
@@ -308,7 +393,8 @@ function startServer(port) {
             ws.memberships.set(room.id, { nickname: wanted, tag })
             members.add(ws)
             ws.joinedRooms.add(room.id)
-            room.emptySince = null
+            room.lastActiveAt = Date.now()
+            persist()
             reply({
               type: 'room:joined',
               room: { id: room.id, name: room.name },
@@ -326,6 +412,7 @@ function startServer(port) {
               members.delete(ws)
               ws.joinedRooms.delete(msg.roomId)
               ws.memberships.delete(msg.roomId)
+              if (rooms.has(msg.roomId)) rooms.get(msg.roomId).lastActiveAt = Date.now()
             }
             scheduleRoomList()
             break
@@ -348,12 +435,15 @@ function startServer(port) {
               createdAt: Date.now()
             }
             const log = messages.get(roomId)
+            const roomOfMsg = rooms.get(roomId)
+            if (roomOfMsg) roomOfMsg.lastActiveAt = Date.now()
             log.push(message)
             if (log.length > 200) log.shift()
             const payload = JSON.stringify({ type: 'chat:message', message })
             members.forEach(c => {
               if (c.readyState === WebSocket.OPEN) c.send(payload)
             })
+            persist()
             break
           }
         }
@@ -369,6 +459,7 @@ function startServer(port) {
       ws.joinedRooms.forEach(roomId => {
         const members = roomMembers.get(roomId)
         if (members) members.delete(ws)
+        if (rooms.has(roomId)) rooms.get(roomId).lastActiveAt = Date.now()
       })
       scheduleRoomList()
     })
